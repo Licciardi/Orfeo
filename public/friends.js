@@ -95,14 +95,27 @@ class Friends extends Emitter {
     if (this.#dialing.has(code)) return;
     this.#dialing.add(code);
     const conn = this.#peer.connect(PREFIX + code, { reliable: true });
-    const giveUp = setTimeout(() => { this.#dialing.delete(code); try { conn.close(); } catch {} }, 12_000);
+    // Pedido de amizade: mostra na tela se chegou ou não (antes ficava "esperando" sem dar pista)
+    const mark = (state) => {
+      const req = first.type === "friend-request" && this.outgoing.find((r) => r.code === code);
+      if (!req || req.state === state || (req.state === "delivered" && state === "unreachable")) return;
+      req.state = state;
+      this.#save();
+      this.emit("change");
+    };
+    const giveUp = setTimeout(() => {
+      this.#dialing.delete(code);
+      try { conn.close(); } catch {}
+      mark("unreachable"); // app do amigo não respondeu: fechado, offline ou versão antiga
+    }, 12_000);
     conn.on("open", () => {
       clearTimeout(giveUp);
       this.#dialing.delete(code);
       this.#wire(conn);
       this.#send(conn, { ...first, code: this.code, ...this.#me(), ...(first.type === "hello" ? this.#presence() : {}), type: first.type });
+      mark("delivered");
     });
-    conn.on("error", () => { clearTimeout(giveUp); this.#dialing.delete(code); });
+    conn.on("error", () => { clearTimeout(giveUp); this.#dialing.delete(code); mark("unreachable"); });
   }
 
   #wire(conn) {

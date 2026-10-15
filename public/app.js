@@ -695,6 +695,13 @@ function openAddFriend() {
   dlg.querySelector("#friend-code-input").focus();
 }
 
+// Situação de um pedido de amizade enviado
+const REQ_STATE = {
+  trying: "· procurando o app dele…",
+  delivered: "· ✓ entregue, esperando ele aceitar",
+  unreachable: "· não encontrado — ele precisa estar com o Orfeo aberto (versão nova, não o Sonora). Tentando de novo a cada 30 s",
+};
+
 // ---------- Lista de amigos ----------
 function renderFriendsBody() {
   const body = document.getElementById("friends-body");
@@ -740,7 +747,7 @@ function renderFriendsBody() {
     </li>`).join("");
 
   const pending = friends.outgoing.map((r) => `
-    <li class="friend-pending">Pedido enviado para <b>${esc(formatCode(r.code))}</b> <button class="link-btn" data-cancel="${esc(r.code)}">cancelar</button></li>`).join("");
+    <li class="friend-pending">Pedido enviado para <b>${esc(formatCode(r.code))}</b> <span class="req-state is-${esc(r.state || "trying")}">${REQ_STATE[r.state] || REQ_STATE.trying}</span> <button class="link-btn" data-cancel="${esc(r.code)}">cancelar</button></li>`).join("");
 
   body.innerHTML = `
     ${friends.status !== "online" ? `<p class="friends-status"><span class="jam-spinner"></span> Conectando…</p>` : ""}

@@ -626,6 +626,9 @@ input[type=range] { accent-color: var(--accent); }
 .friends-list + .friends-list { margin-top: 14px; }
 .friends-pending { list-style: none; padding: 0; margin: 16px 0 0; color: var(--muted); font-size: .85rem; }
 .friend-pending { padding: 4px 2px; }
+.req-state { font-size: .8rem; }
+.req-state.is-delivered { color: #2ed47a; }
+.req-state.is-unreachable { color: #ffb020; }
 .link-btn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
 .friends-empty { max-width: 420px; margin: 48px auto; text-align: center; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 12px; line-height: 1.5; }
 .setting-toggle-row { cursor: pointer; }
