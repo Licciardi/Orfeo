@@ -1,8 +1,28 @@
-# ◉ Orfeo
+<p align="center">
+  <img src="electron/icon.png" width="128" alt="Ícone do Orfeo: uma lira dourada" />
+</p>
 
-Player de música para desktop que toca o catálogo do **YouTube / YouTube Music**, com Jam para ouvir junto com amigos, transições estilo DJ, letras sincronizadas e visualizador que reage à batida.
+<h1 align="center">Orfeo</h1>
+
+<p align="center">
+  Player de música para desktop que toca o catálogo do <b>YouTube / YouTube Music</b>, com Jam para ouvir junto com amigos, transições estilo DJ, letras sincronizadas e visualizador que reage à batida.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Licciardi/Orfeo/releases/latest/download/Orfeo-Setup.exe"><b>⬇ Baixar para Windows</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Licciardi/Orfeo/releases">Todas as versões</a>
+</p>
 
 > Orfeu, o músico da mitologia grega cuja música encantava deuses e feras — em italiano, *Orfeo*.
+
+## Baixar e instalar
+
+1. Baixe o **[Orfeo-Setup.exe](https://github.com/Licciardi/Orfeo/releases/latest/download/Orfeo-Setup.exe)** (Windows 10/11, 64 bits).
+2. Abra o instalador. O Windows pode mostrar **"O Windows protegeu o computador"**, porque o app não tem assinatura digital paga: clique em **Mais informações → Executar assim mesmo**.
+3. Escolha a pasta e pronto — o Orfeo aparece no menu Iniciar.
+
+Para ouvir junto com alguém, os dois precisam da mesma versão: em **Amigos → + Adicionar**, troquem os códigos de amigo.
 
 ## Recursos
 
