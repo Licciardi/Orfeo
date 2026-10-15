@@ -22,6 +22,61 @@ function toast(msg) {
 }
 
 // ---------- Componentes ----------
+// Ícones das ações de música (os mesmos na lista e nos cards)
+const TRACK_ICONS = {
+  like: `<svg viewBox="0 0 24 24" class="i-heart"><path d="M12 20.5s-7.5-4.6-9.3-9.2C1.5 8.1 3.6 4.5 7.2 4.5c2 0 3.6 1.1 4.8 2.8 1.2-1.7 2.8-2.8 4.8-2.8 3.6 0 5.7 3.6 4.5 6.8-1.8 4.6-9.3 9.2-9.3 9.2z"/></svg>`,
+  // mesmo desenho do botão de fila da barra de baixo: linhas + ▶
+  queue: `<svg viewBox="0 0 24 24"><path d="M3 6h13M3 11h13M3 16h8"/><path class="i-solid" d="M15 14v7l5.5-3.5z"/></svg>`,
+  // nota musical com +
+  add: `<svg viewBox="0 0 24 24"><path d="M9 18V6l9-2v4"/><circle cx="6" cy="18" r="3"/><path d="M18 13v8M14 17h8"/></svg>`,
+  jam: `<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.2a5 5 0 0 1 5.5 4.8"/></svg>`,
+  remove: `<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>`,
+};
+
+// Botões de ação de uma música. `cls` muda o visual (lista ou card)
+function trackActions(t, cls, extra = "") {
+  const liked = library.isLiked(t.id);
+  const jamTitle = jam.status === "live" ? "Adicionar à Jam" : "Abrir uma Jam com essa música";
+  return `
+    <button class="${cls} ${liked ? "is-on" : ""}" data-act="like" title="${liked ? "Descurtir" : "Curtir"}" aria-pressed="${liked}">${TRACK_ICONS.like}</button>
+    <button class="${cls}" data-act="queue" title="Adicionar à fila">${TRACK_ICONS.queue}</button>
+    <button class="${cls}" data-act="add" title="Salvar numa playlist">${TRACK_ICONS.add}</button>
+    <button class="${cls} btn-rgb" data-act="jam" title="${jamTitle}">${TRACK_ICONS.jam}</button>
+    ${extra}`;
+}
+
+// O que cada botão faz (lista e cards)
+async function trackAction(act, t, b, ctx = {}) {
+  if (act === "like") {
+    library.toggleLike(t);
+    const on = library.isLiked(t.id);
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-pressed", on);
+    b.title = on ? "Descurtir" : "Curtir";
+  }
+  if (act === "queue") {
+    player.addToQueue(jam.active ? { ...t, addedBy: jam.myId } : t);
+    toast(jam.status === "live" ? "Adicionada à fila da Jam" : "Adicionada à fila");
+  }
+  if (act === "add") pickPlaylist(t, b);
+  if (act === "remove") library.removeFromPlaylist(ctx.playlistId, t.id);
+  if (act === "jam") await addToJam(t);
+}
+
+// Botão RGB: numa Jam, a música entra na fila de todo mundo; fora dela, abre uma Jam com ela
+async function addToJam(t) {
+  try {
+    if (jam.status === "live") {
+      player.addToQueue({ ...t, addedBy: jam.myId });
+      return toast(`“${t.title}” entrou na Jam`);
+    }
+    if (jam.active) return; // ainda conectando
+    if (!player.current) player.playList([t], 0); else player.addToQueue(t);
+    await jam.host();
+    toast("Jam aberta com essa música — chame amigos em Amigos");
+  } catch (err) { toast(err.message); }
+}
+
 // Lista de faixas reutilizada em todas as views. `ctx.playlistId` habilita o "remover".
 function trackList(tracks, ctx = {}) {
   if (!tracks.length) return `<p class="empty">${ctx.empty || "Nenhuma faixa aqui ainda."}</p>`;
@@ -33,10 +88,7 @@ function trackList(tracks, ctx = {}) {
       <div class="t-meta"><div class="t-title">${esc(t.title)}</div><div class="t-artist">${esc(t.artist)}</div></div>
       <span class="t-dur">${esc(t.duration || "")}</span>
       <div class="t-actions">
-        <button class="icon-btn" data-act="like" title="Curtir">${library.isLiked(t.id) ? "♥" : "♡"}</button>
-        <button class="icon-btn" data-act="queue" title="Adicionar à fila">⊕</button>
-        <button class="icon-btn" data-act="add" title="Adicionar à playlist">＋</button>
-        ${ctx.playlistId ? `<button class="icon-btn" data-act="remove" title="Remover">✕</button>` : ""}
+        ${trackActions(t, "icon-btn t-act", ctx.playlistId ? `<button class="icon-btn t-act" data-act="remove" title="Remover da playlist">${TRACK_ICONS.remove}</button>` : "")}
       </div>
     </li>`).join("")}</ol>`;
 }
@@ -48,11 +100,7 @@ function bindTrackList(root, tracks, ctx = {}) {
     li.querySelector(".t-num").addEventListener("click", () => player.playList(tracks, i));
     li.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation();
-      const act = b.dataset.act;
-      if (act === "like") { library.toggleLike(t); b.textContent = library.isLiked(t.id) ? "♥" : "♡"; }
-      if (act === "queue") { player.addToQueue(jam.active ? { ...t, addedBy: jam.myId } : t); toast("Adicionada à fila"); }
-      if (act === "add") pickPlaylist(t, b);
-      if (act === "remove") library.removeFromPlaylist(ctx.playlistId, t.id);
+      trackAction(b.dataset.act, t, b, ctx);
     }));
   });
 }
@@ -80,11 +128,7 @@ function trackCards(tracks, ctx = {}) {
         aria-label="${esc(t.title)} — ${esc(t.artist)}">
         <div class="tcard-face"><img class="tcard-img" referrerpolicy="no-referrer" src="${esc(cardCover(t))}" data-vid="${esc(t.id)}" alt="" loading="lazy" /></div>
         <span class="tcard-now"><span class="tcard-eq"><i></i><i></i><i></i></span>Tocando</span>
-        <div class="tcard-actions">
-          <button class="tcard-btn" data-act="like" title="Curtir">${library.isLiked(t.id) ? "♥" : "♡"}</button>
-          <button class="tcard-btn" data-act="queue" title="Adicionar à fila">⊕</button>
-          <button class="tcard-btn" data-act="add" title="Adicionar à playlist">＋</button>
-        </div>
+        <div class="tcard-actions">${trackActions(t, "tcard-btn")}</div>
         <div class="tcard-text">
           <h3>${esc(t.title)}</h3>
           <p>${esc(t.artist)}${t.duration ? ` <span>• ${esc(t.duration)}</span>` : ""}</p>
@@ -120,9 +164,7 @@ function bindTrackCards(root, tracks) {
       e.stopPropagation();
       const act = b.dataset.act;
       if (act === "play") player.playList(tracks, i);
-      if (act === "like") { library.toggleLike(t); b.textContent = library.isLiked(t.id) ? "♥" : "♡"; }
-      if (act === "queue") { player.addToQueue(jam.active ? { ...t, addedBy: jam.myId } : t); toast("Adicionada à fila"); }
-      if (act === "add") pickPlaylist(t, b);
+      else trackAction(act, t, b);
     }));
   });
 }
@@ -138,25 +180,74 @@ function pickPlaylist(track, anchor) {
   menu.style.top = `${Math.min(r.bottom + 4, innerHeight - 220)}px`;
   menu.style.left = `${Math.min(r.left - 120, innerWidth - 220)}px`;
   document.body.append(menu);
-  menu.addEventListener("click", (e) => {
+  menu.addEventListener("click", async (e) => {
     const b = e.target.closest("button");
     if (!b) return;
-    const pl = b.dataset.new !== undefined ? newPlaylist() : library.getPlaylist(b.dataset.id);
-    if (pl) { library.addToPlaylist(pl.id, track); toast(`Adicionada a "${pl.name}"`); }
     menu.remove();
+    const pl = b.dataset.new !== undefined ? await newPlaylist() : library.getPlaylist(b.dataset.id);
+    if (pl) { library.addToPlaylist(pl.id, track); toast(`Adicionada a "${pl.name}"`); }
   });
   setTimeout(() => document.addEventListener("click", () => menu.remove(), { once: true }));
 }
 
-function newPlaylist() {
-  const name = prompt("Nome da playlist:", `Minha playlist #${library.playlists.length + 1}`);
-  return name?.trim() ? library.createPlaylist(name.trim()) : null;
+// Janelinha para digitar um texto. Substitui o prompt() do navegador, que não existe no app
+// desktop (Electron) — era por isso que criar/renomear playlist só funcionava no navegador.
+function askText({ title, label = "", value = "", okLabel = "Salvar", maxLength = 60 }) {
+  return new Promise((resolve) => {
+    document.querySelector("dialog.modal")?.remove();
+    const dlg = document.createElement("dialog");
+    dlg.className = "modal";
+    dlg.innerHTML = `
+      <form method="dialog" class="modal-close"><button class="icon-btn" aria-label="Fechar">✕</button></form>
+      <h2>${esc(title)}</h2>
+      <form class="modal-form">
+        ${label ? `<label class="setting-sub" for="modal-input">${esc(label)}</label>` : ""}
+        <input id="modal-input" maxlength="${maxLength}" value="${esc(value)}" autocomplete="off" />
+        <div class="modal-actions">
+          <button type="button" class="pill ghost" data-cancel>Cancelar</button>
+          <button class="pill">${esc(okLabel)}</button>
+        </div>
+      </form>`;
+    document.body.append(dlg);
+    let result = null;
+    const input = dlg.querySelector("#modal-input");
+    dlg.querySelector(".modal-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (!input.value.trim()) return input.focus();
+      result = input.value.trim();
+      dlg.close();
+    });
+    dlg.querySelector("[data-cancel]").addEventListener("click", () => dlg.close());
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); }); // clicar fora fecha
+    dlg.addEventListener("close", () => { dlg.remove(); resolve(result); });
+    dlg.showModal();
+    input.select();
+  });
+}
+
+async function newPlaylist() {
+  const name = await askText({
+    title: "Nova playlist", label: "Nome", okLabel: "Criar",
+    value: `Minha playlist #${library.playlists.length + 1}`,
+  });
+  return name ? library.createPlaylist(name) : null;
 }
 
 function card(href, img, title, sub) {
   return `<a class="card" href="${href}"><div class="card-img">${img}</div><div class="card-title">${esc(title)}</div><div class="card-sub">${esc(sub)}</div></a>`;
 }
-const cover = (pl) => pl.tracks[0] ? `<img referrerpolicy="no-referrer" src="${esc(pl.tracks[0].thumb)}" alt="" />` : `<span>♪</span>`;
+
+// Capa da playlist: a capa do álbum da primeira música, ou um mosaico 2×2 com as 4 primeiras
+// capas diferentes (como no Spotify). Playlist vazia: degradê com ♪.
+function playlistCover(pl, cls = "") {
+  const thumbs = [...new Set(pl.tracks.map((t) => t.thumb))].slice(0, 4);
+  const img = (u, t) => `<img referrerpolicy="no-referrer" src="${esc(u)}" data-vid="${esc(t?.id ?? "")}" alt="" loading="lazy" />`;
+  if (!thumbs.length) return `<span class="pl-cover is-empty ${cls}">♪</span>`;
+  if (thumbs.length < 4) return `<span class="pl-cover ${cls}">${img(thumbs[0], pl.tracks[0])}</span>`;
+  return `<span class="pl-cover is-mosaic ${cls}">${thumbs.map((u) => img(u, pl.tracks.find((t) => t.thumb === u))).join("")}</span>`;
+}
+const likedCover = (cls = "") => `<span class="pl-cover is-liked ${cls}">♥</span>`;
+const cover = (pl) => playlistCover(pl, "is-fill");
 
 // ---------- Views (rotas) ----------
 const routes = {
@@ -167,7 +258,7 @@ const routes = {
       <h1>${greet}${profile.name ? `, ${esc(profile.name.split(" ")[0])}` : ""}</h1>
       <section><h2>Tocadas recentemente</h2><div id="recent"></div></section>
       <section><h2>Suas playlists</h2><div class="grid">
-        ${card("#/liked", "<span>♥</span>", "Músicas curtidas", `${library.liked.length} faixas`)}
+        ${card("#/liked", likedCover("is-fill"), "Músicas curtidas", `${library.liked.length} faixas`)}
         ${library.playlists.map((p) => card(`#/playlist/${p.id}`, cover(p), p.name, `${p.tracks.length} faixas`)).join("")}
       </div></section>`;
     const recent = $("#recent");
@@ -224,23 +315,23 @@ const routes = {
     view.innerHTML = `
       <div class="row"><h1>Sua biblioteca</h1><button id="lib-new" class="pill">＋ Nova playlist</button></div>
       <div class="grid">
-        ${card("#/liked", "<span>♥</span>", "Músicas curtidas", `${library.liked.length} faixas`)}
+        ${card("#/liked", likedCover("is-fill"), "Músicas curtidas", `${library.liked.length} faixas`)}
         ${library.playlists.map((p) => card(`#/playlist/${p.id}`, cover(p), p.name, `${p.tracks.length} faixas`)).join("")}
       </div>`;
-    $("#lib-new").addEventListener("click", () => { const p = newPlaylist(); if (p) location.hash = `#/playlist/${p.id}`; });
+    $("#lib-new").addEventListener("click", async () => { const p = await newPlaylist(); if (p) location.hash = `#/playlist/${p.id}`; });
   },
 
   liked() {
-    collectionView({ title: "Músicas curtidas", kind: "Coleção", tracks: library.liked, coverHtml: "<span>♥</span>" });
+    collectionView({ title: "Músicas curtidas", kind: "Coleção", tracks: library.liked, coverHtml: likedCover("is-fill") });
   },
 
   playlist(id) {
     const pl = library.getPlaylist(id);
     if (!pl) { view.innerHTML = `<p class="empty">Playlist não encontrada.</p>`; return; }
     collectionView({ title: pl.name, kind: "Playlist", tracks: pl.tracks, coverHtml: cover(pl), playlistId: pl.id });
-    $("#pl-rename").addEventListener("click", () => {
-      const n = prompt("Novo nome:", pl.name);
-      if (n?.trim()) library.renamePlaylist(pl.id, n.trim());
+    $("#pl-rename").addEventListener("click", async () => {
+      const n = await askText({ title: "Renomear playlist", label: "Nome", value: pl.name });
+      if (n) library.renamePlaylist(pl.id, n);
     });
     $("#pl-delete").addEventListener("click", () => {
       if (confirm(`Excluir "${pl.name}"?`)) { library.deletePlaylist(pl.id); location.hash = "#/library"; }
@@ -316,6 +407,14 @@ const routes = {
       </section>
 
       <section class="profile-section">
+        <h2>Privacidade</h2>
+        <label class="setting setting-toggle-row">
+          <div><div class="setting-title">Mostrar o que estou ouvindo</div><div class="setting-sub">Seus amigos veem a música que está tocando e se você abriu uma Jam.</div></div>
+          <span class="switch"><input type="checkbox" id="friends-share" ${friends.share ? "checked" : ""} /><span class="switch-track"></span></span>
+        </label>
+      </section>
+
+      <section class="profile-section">
         <h2>Mais ouvidos recentemente</h2>
         ${top.length ? `<div class="artists">${top.map((a) => `
           <div class="artist">
@@ -363,37 +462,28 @@ const routes = {
     secs.addEventListener("input", () => { $("#mix-seconds-val").textContent = `${secs.value} s`; });
     secs.addEventListener("change", () => player.setMixSeconds(secs.value));
     $("#mix-instrumental").addEventListener("change", (e) => player.setInstrumental(e.target.checked));
+    $("#friends-share").addEventListener("change", (e) => friends.setShare(e.target.checked));
     renderMix();
   },
 
-  // Amigos + Jam no mesmo lugar: painel da Jam no topo, seu código e a lista de amigos embaixo
+  // Amigos: só a lista. Códigos ficam na janelinha "+ Adicionar"; a Jam é por amigos (sem código)
   friends() {
     view.innerHTML = `
-      <h1>Amigos</h1>
-      <section id="jam-section"></section>
-      <div class="friends-top">
-        <div class="friend-code-card">
-          <div>
-            <div class="setting-sub">Seu código de amigo</div>
-            <div class="friend-code">${esc(formatCode(friends.code))}</div>
-          </div>
-          <button id="fc-copy" class="pill ghost">Copiar</button>
+      <div class="friends-header">
+        <h1>Amigos</h1>
+        <div class="friends-header-actions">
+          <button id="jam-start" class="pill ghost">Iniciar Jam</button>
+          <button id="friend-open-add" class="pill">＋ Adicionar</button>
         </div>
-        <form id="friend-add" class="jam-join friend-add">
-          <input id="friend-code-input" maxlength="9" placeholder="Código do amigo" autocomplete="off" spellcheck="false" />
-          <button class="pill">Adicionar</button>
-        </form>
       </div>
+      <section id="jam-section"></section>
       <div id="friends-body"></div>`;
-    $("#fc-copy").addEventListener("click", async () => {
-      try { await navigator.clipboard.writeText(formatCode(friends.code)); toast("Código copiado"); }
-      catch { toast(`Seu código: ${formatCode(friends.code)}`); }
-    });
-    $("#friend-add").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const input = $("#friend-code-input");
-      try { await friends.add(input.value); input.value = ""; toast("Pedido enviado"); }
+    $("#friend-open-add").addEventListener("click", openAddFriend);
+    $("#jam-start").addEventListener("click", async (e) => {
+      e.target.disabled = true;
+      try { await jam.host(); toast("Jam aberta: chame alguém da lista"); }
       catch (err) { toast(err.message); }
+      e.target.disabled = false;
     });
     renderJamSection();
     renderFriendsBody();
@@ -499,160 +589,128 @@ jam.on("change", () => {
 });
 jam.on("toast", toast);
 
-// ---------- Painel da Jam (dentro de Amigos) ----------
+// ---------- Jam ao vivo: faixa fina no topo de Amigos ----------
 function renderJamSection() {
   const box = document.getElementById("jam-section");
   if (!box) return;
-
-  if (!jam.active) {
-    box.innerHTML = `
-      <div class="jam-panel">
-        <div class="jam-panel-head">
-          <div class="jam-card-icon">${ICON_JAM}</div>
-          <div>
-            <h2>Jam</h2>
-            <p>Ouçam juntos: a mesma música, no mesmo segundo. Todo mundo pode pausar, pular e adicionar músicas.</p>
-          </div>
-        </div>
-        <div class="jam-panel-actions">
-          <button id="jam-host" class="pill">Iniciar Jam</button>
-          <span class="jam-or">ou</span>
-          <form id="jam-join" class="jam-join">
-            <input id="jam-code" maxlength="7" placeholder="Código da Jam" autocomplete="off" spellcheck="false" />
-            <button class="pill ghost">Entrar</button>
-          </form>
-        </div>
-        ${profile.name ? "" : `<p class="jam-hint">Dica: coloque seu nome e foto no <a href="#/profile">perfil</a> para seus amigos saberem quem está na Jam.</p>`}
-      </div>`;
-    $("#jam-host").addEventListener("click", async (e) => {
-      e.target.disabled = true;
-      try { await jam.host(); } catch (err) { toast(err.message); e.target.disabled = false; }
-    });
-    $("#jam-join").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      try { await jam.join($("#jam-code").value); } catch (err) { toast(err.message); }
-    });
+  const live = jam.status === "live", connecting = jam.status === "connecting";
+  $("#jam-start")?.toggleAttribute("hidden", jam.active); // com Jam aberta, a faixa substitui o botão
+  if (!jam.active) return void (box.innerHTML = "");
+  if (connecting) {
+    box.innerHTML = `<div class="jam-strip"><span class="jam-spinner"></span><span>${jam.role === "host" ? "Abrindo a Jam…" : "Entrando na Jam…"}</span></div>`;
     return;
   }
-
-  if (jam.status === "connecting") {
-    box.innerHTML = `<div class="jam-panel"><div class="jam-connecting"><span class="jam-spinner"></span>${jam.role === "host" ? "Criando a Jam…" : "Entrando na Jam…"}</div></div>`;
-    return;
-  }
-
+  if (!live) return;
   const isHost = jam.role === "host";
+  const alone = isHost && jam.members.length === 1;
   box.innerHTML = `
-    <div class="jam-panel is-live">
-      <div class="jam-live-top">
-        <div>
-          <div class="jam-badge"><span class="jam-dot"></span> Jam ao vivo</div>
-          <h2>${isHost ? "Sua Jam" : `Jam de ${esc(jam.hostName || "um amigo")}`}</h2>
-          <p>${isHost
-            ? "Chame um amigo pela lista abaixo, ou mande o código para ele entrar:"
-            : "Você está ouvindo junto. Pausar, pular e adicionar músicas muda pra todo mundo."}</p>
-        </div>
-        <button id="jam-leave" class="pill ghost">${isHost ? "Encerrar Jam" : "Sair da Jam"}</button>
-      </div>
-      ${isHost ? `
-        <div class="jam-code-row">
-          <div class="jam-code">${esc(jam.code.slice(0, 3))}<span>${esc(jam.code.slice(3))}</span></div>
-          <button id="jam-copy" class="pill ghost">Copiar código</button>
-        </div>` : ""}
-      <div class="jam-people">
-        ${jam.members.map((m) => `
-          <span class="jam-person">
-            ${memberAvatar(m, "avatar-sm")}
-            <span>${esc(m.name)}</span>
-            ${m.host ? `<span class="jam-tag">anfitrião</span>` : ""}
-          </span>`).join("")}
-        ${isHost && jam.members.length === 1 ? `<span class="jam-waiting">Esperando alguém entrar…</span>` : ""}
-      </div>
+    <div class="jam-strip is-live">
+      <span class="jam-strip-title"><span class="jam-dot"></span>${isHost ? "Sua Jam" : `Jam de ${esc(jam.hostName || "um amigo")}`}</span>
+      <span class="jam-strip-people">${jam.members.map((m) => memberAvatar(m, "avatar-xs")).join("")}</span>
+      <span class="jam-strip-note">${alone ? "Chame alguém da lista" : `${jam.members.length} ouvindo`}</span>
+      <button id="jam-leave" class="pill ghost">${isHost ? "Encerrar" : "Sair"}</button>
     </div>`;
-  $("#jam-copy")?.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(jam.code); toast("Código copiado"); }
-    catch { toast(`Código: ${jam.code}`); }
-  });
   $("#jam-leave").addEventListener("click", () => {
-    if (!isHost || confirm("Encerrar a Jam para todo mundo?")) jam.leave();
+    if (!isHost || alone || confirm("Encerrar a Jam para todo mundo?")) jam.leave();
   });
 }
 
-// ---------- Amigos ----------
-// Lista (re-renderizada quando algo muda, sem mexer no campo de adicionar)
+// ---------- Janelinha "Adicionar amigo" (o único lugar com códigos) ----------
+function openAddFriend() {
+  document.querySelector(".add-friend")?.remove();
+  const dlg = document.createElement("dialog");
+  dlg.className = "add-friend";
+  dlg.innerHTML = `
+    <form method="dialog" class="add-friend-close"><button class="icon-btn" aria-label="Fechar">✕</button></form>
+    <h2>Adicionar amigo</h2>
+    <div class="add-friend-mine">
+      <div>
+        <div class="setting-sub">Seu código — mande para seu amigo</div>
+        <div class="friend-code">${esc(formatCode(friends.code))}</div>
+      </div>
+      <button id="fc-copy" class="pill ghost" type="button">Copiar</button>
+    </div>
+    <form id="friend-add" class="jam-join">
+      <input id="friend-code-input" maxlength="9" placeholder="Código do amigo" autocomplete="off" spellcheck="false" />
+      <button class="pill">Adicionar</button>
+    </form>`;
+  document.body.append(dlg);
+  dlg.addEventListener("close", () => dlg.remove());
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); }); // clicar fora fecha
+  dlg.querySelector("#fc-copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(formatCode(friends.code)); toast("Código copiado"); }
+    catch { toast(`Seu código: ${formatCode(friends.code)}`); }
+  });
+  dlg.querySelector("#friend-add").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = dlg.querySelector("#friend-code-input");
+    try { await friends.add(input.value); toast("Pedido enviado"); dlg.close(); }
+    catch (err) { toast(err.message); }
+  });
+  dlg.showModal();
+  dlg.querySelector("#friend-code-input").focus();
+}
+
+// ---------- Lista de amigos ----------
 function renderFriendsBody() {
   const body = document.getElementById("friends-body");
   if (!body) return;
   const pres = (code) => friends.presence.get(code) || {};
   const rank = (f) => { const p = pres(f.code); return (p.online ? 0 : 2) + (p.online && p.track && p.playing ? -1 : 0); };
   const list = [...friends.list].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-  const online = list.filter((f) => pres(f.code).online).length;
 
   const row = (f) => {
     const p = pres(f.code);
     const who = { name: p.name || f.name, photo: p.photo || f.photo };
     const inMyJam = p.jam && jam.status === "live" && p.jam === jam.code;
-    let status = "Offline";
-    if (p.online) {
-      status = p.track ? `${p.playing ? "♪ Ouvindo" : "Pausado:"} ${esc(p.track.title)} <span>— ${esc(p.track.artist)}</span>` : "Online";
-      if (p.jam) status += inMyJam ? " • na sua Jam" : " • numa Jam";
-    }
+    const status = !p.online ? "Offline"
+      : p.track ? `${p.playing ? "♪" : "❚❚"} ${esc(p.track.title)} <span>— ${esc(p.track.artist)}</span>`
+      : "Online";
     const action = !p.online ? ""
-      : inMyJam ? `<span class="jam-tag">na Jam</span>`
+      : inMyJam ? `<span class="friend-badge">na sua Jam</span>`
       : p.jam ? `<button class="pill" data-join="${esc(p.jam)}" data-name="${esc(who.name)}">Entrar na Jam</button>`
-      : `<button class="pill ghost" data-invite="${esc(f.code)}" data-name="${esc(who.name)}">Chamar para Jam</button>`;
+      : `<button class="pill ghost" data-invite="${esc(f.code)}" data-name="${esc(who.name)}">Chamar</button>`;
     return `
       <li class="friend ${p.online ? "is-online" : ""}">
         <span class="friend-avatar">${memberAvatar(who, "avatar-md")}<span class="presence-dot"></span></span>
         <div class="friend-meta">
-          <div class="friend-name">${esc(who.name)}</div>
+          <div class="friend-name">${esc(who.name)}${p.jam && !inMyJam ? ` <span class="friend-badge">numa Jam</span>` : ""}</div>
           <div class="friend-status">${status}</div>
         </div>
-        ${p.online && p.track ? `<img class="friend-track" referrerpolicy="no-referrer" src="${esc(p.track.thumb)}" data-vid="${esc(p.track.id)}" alt="" title="${esc(p.track.title)}" />` : ""}
+        ${p.online && p.track ? `<img class="friend-track" referrerpolicy="no-referrer" src="${esc(p.track.thumb)}" data-vid="${esc(p.track.id)}" alt="" />` : ""}
         <div class="friend-actions">
           ${action}
-          <button class="icon-btn" data-remove="${esc(f.code)}" data-name="${esc(who.name)}" title="Desfazer amizade">✕</button>
+          <button class="icon-btn friend-remove" data-remove="${esc(f.code)}" data-name="${esc(who.name)}" title="Desfazer amizade" aria-label="Desfazer amizade com ${esc(who.name)}">✕</button>
         </div>
       </li>`;
   };
 
-  body.innerHTML = `
-    ${friends.status !== "online" ? `<p class="friends-status"><span class="jam-spinner"></span> Conectando ao servidor de amigos…</p>` : ""}
-    ${friends.incoming.length ? `
-      <section class="profile-section">
-        <h2>Pedidos de amizade</h2>
-        <ul class="friends-list">${friends.incoming.map((r) => `
-          <li class="friend">
-            <span class="friend-avatar">${memberAvatar(r, "avatar-md")}</span>
-            <div class="friend-meta"><div class="friend-name">${esc(r.name)}</div><div class="friend-status">${esc(formatCode(r.code))} quer ser seu amigo</div></div>
-            <div class="friend-actions">
-              <button class="pill" data-accept="${esc(r.code)}">Aceitar</button>
-              <button class="pill ghost" data-decline="${esc(r.code)}">Recusar</button>
-            </div>
-          </li>`).join("")}</ul>
-      </section>` : ""}
-    <section class="profile-section">
-      <h2>Seus amigos${list.length ? ` <span class="friends-count">${online} online</span>` : ""}</h2>
-      ${list.length ? `<ul class="friends-list">${list.map(row).join("")}</ul>`
-        : `<p class="empty">Mande seu código para um amigo, ou adicione o código dele aqui em cima.</p>`}
-    </section>
-    ${friends.outgoing.length ? `
-      <section class="profile-section">
-        <h2>Pedidos enviados</h2>
-        <ul class="friends-list">${friends.outgoing.map((r) => `
-          <li class="friend">
-            <span class="friend-avatar"><span class="avatar avatar-md"><span class="avatar-initials">?</span></span></span>
-            <div class="friend-meta"><div class="friend-name">${esc(formatCode(r.code))}</div><div class="friend-status">Esperando aceitar (o pedido chega quando ele estiver online)</div></div>
-            <div class="friend-actions"><button class="pill ghost" data-cancel="${esc(r.code)}">Cancelar</button></div>
-          </li>`).join("")}</ul>
-      </section>` : ""}
-    <label class="autoplay-row setting-toggle friends-share">
-      <span>
-        <span class="autoplay-title">Mostrar o que estou ouvindo</span>
-        <span class="autoplay-sub">Seus amigos veem a música que está tocando e se você abriu uma Jam.</span>
-      </span>
-      <span class="switch"><input type="checkbox" id="friends-share" ${friends.share ? "checked" : ""} /><span class="switch-track"></span></span>
-    </label>`;
+  const requests = friends.incoming.map((r) => `
+    <li class="friend is-request">
+      <span class="friend-avatar">${memberAvatar(r, "avatar-md")}</span>
+      <div class="friend-meta"><div class="friend-name">${esc(r.name)}</div><div class="friend-status">quer ser seu amigo</div></div>
+      <div class="friend-actions is-visible">
+        <button class="pill" data-accept="${esc(r.code)}">Aceitar</button>
+        <button class="icon-btn" data-decline="${esc(r.code)}" title="Recusar" aria-label="Recusar">✕</button>
+      </div>
+    </li>`).join("");
 
+  const pending = friends.outgoing.map((r) => `
+    <li class="friend-pending">Pedido enviado para <b>${esc(formatCode(r.code))}</b> <button class="link-btn" data-cancel="${esc(r.code)}">cancelar</button></li>`).join("");
+
+  body.innerHTML = `
+    ${friends.status !== "online" ? `<p class="friends-status"><span class="jam-spinner"></span> Conectando…</p>` : ""}
+    ${requests ? `<ul class="friends-list">${requests}</ul>` : ""}
+    ${list.length
+      ? `<ul class="friends-list">${list.map(row).join("")}</ul>`
+      : `<div class="friends-empty">
+           <div class="jam-card-icon">${ICON_JAM}</div>
+           <p>Seus amigos aparecem aqui: quem está online, o que está ouvindo, e dá para chamar para uma Jam.</p>
+           <button class="pill" data-open-add>＋ Adicionar amigo</button>
+         </div>`}
+    ${pending ? `<ul class="friends-pending">${pending}</ul>` : ""}`;
+
+  body.querySelector("[data-open-add]")?.addEventListener("click", openAddFriend);
   body.querySelectorAll("[data-accept]").forEach((b) => b.addEventListener("click", () => friends.accept(b.dataset.accept)));
   body.querySelectorAll("[data-decline]").forEach((b) => b.addEventListener("click", () => friends.decline(b.dataset.decline)));
   body.querySelectorAll("[data-cancel]").forEach((b) => b.addEventListener("click", () => friends.cancelRequest(b.dataset.cancel)));
@@ -663,12 +721,11 @@ function renderFriendsBody() {
   body.querySelectorAll("[data-invite]").forEach((b) => b.addEventListener("click", async () => {
     b.disabled = true;
     try {
-      if (!jam.active) await jam.host(); // ainda não tem Jam: cria uma na hora
+      if (!jam.active) await jam.host(); // ainda não tem Jam: abre uma na hora
       if (friends.invite(b.dataset.invite)) toast(`Convite enviado para ${b.dataset.name}`);
     } catch (err) { toast(err.message); }
     b.disabled = false;
   }));
-  $("#friends-share").addEventListener("change", (e) => friends.setShare(e.target.checked));
 }
 
 async function joinFriendJam(code, name) {
@@ -777,12 +834,21 @@ function render() {
 }
 addEventListener("hashchange", render);
 
+// Lateral: cada playlist com a capa (do álbum ou mosaico), nome e quantidade de músicas
 function renderSidebar() {
+  const count = (n) => `${n} ${n === 1 ? "música" : "músicas"}`;
+  const item = (href, coverHtml, name, sub) => `
+    <li><a href="${href}" class="sb-pl">
+      ${coverHtml}
+      <span class="sb-pl-text"><span class="sb-pl-name">${esc(name)}</span><span class="sb-pl-sub">${esc(sub)}</span></span>
+    </a></li>`;
   $("#sidebar-playlists").innerHTML =
-    `<li><a href="#/liked">♥ Músicas curtidas</a></li>` +
-    library.playlists.map((p) => `<li><a href="#/playlist/${p.id}">${esc(p.name)}</a></li>`).join("");
+    item("#/liked", likedCover(), "Músicas curtidas", count(library.liked.length)) +
+    library.playlists.map((p) => item(`#/playlist/${p.id}`, playlistCover(p), p.name, `Playlist • ${count(p.tracks.length)}`)).join("");
+  // destaca a playlist aberta
+  document.querySelectorAll(".sidebar-playlists a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === location.hash));
 }
-$("#new-playlist").addEventListener("click", () => { const p = newPlaylist(); if (p) location.hash = `#/playlist/${p.id}`; });
+$("#new-playlist").addEventListener("click", async () => { const p = await newPlaylist(); if (p) location.hash = `#/playlist/${p.id}`; });
 
 // Re-renderiza a view atual quando os dados mudam (exceto a busca, para não perder resultados)
 library.on("change", () => { renderSidebar(); if (!/^#\/(search|visualizer)/.test(location.hash)) render(); updateNowPlaying(); });
