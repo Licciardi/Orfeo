@@ -1,0 +1,39 @@
+{
+  "name": "orfeo",
+  "productName": "Orfeo",
+  "version": "1.0.0",
+  "description": "Player de música desktop no estilo Spotify, tocando do YouTube / YouTube Music",
+  "license": "MIT",
+  "author": "Luigi Licciardi",
+  "main": "electron/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "web": "node server.js",
+    "icon": "node electron/make-icon.js",
+    "dist": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.orfeo.player",
+    "productName": "Orfeo",
+    "files": [
+      "electron/**/*",
+      "public/**/*",
+      "server.js",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "electron/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3",
+    "peerjs": "^1.5.5"
+  }
+}

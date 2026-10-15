@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Orfeo</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- Só aparece no app desktop: área para arrastar a janela -->
+  <div class="titlebar"><span class="logo">◉</span> Orfeo</div>
+  <div class="app">
+    <!-- Barra lateral: navegação + biblioteca -->
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">◉</span> Orfeo</div>
+      <nav class="nav">
+        <a href="#/" data-route="home">⌂ Início</a>
+        <a href="#/search" data-route="search">⌕ Buscar</a>
+        <a href="#/library" data-route="library">▤ Biblioteca</a>
+        <a href="#/visualizer" data-route="visualizer">◎ Visualizador</a>
+        <a href="#/jam" data-route="jam">⚇ Jam</a>
+        <a href="#/friends" data-route="friends">☺ Amigos <span id="friends-online" class="nav-count"></span></a>
+      </nav>
+      <div class="library-head">
+        <span>Playlists</span>
+        <button id="new-playlist" class="icon-btn" title="Nova playlist">＋</button>
+      </div>
+      <ul id="sidebar-playlists" class="sidebar-playlists"></ul>
+      <!-- Atalho do perfil (fica no rodapé do menu) -->
+      <a href="#/profile" id="profile-chip" class="profile-chip" data-route="profile">
+        <span id="profile-chip-avatar" class="avatar avatar-sm"></span>
+        <span id="profile-chip-name" class="profile-chip-name"></span>
+      </a>
+    </aside>
+
+    <!-- Área principal: o router renderiza as views aqui -->
+    <main id="view" class="view"></main>
+
+    <!-- Painel direito: vídeo + faixa atual + "a seguir" -->
+    <aside id="queue-panel" class="queue-panel is-empty">
+      <div class="video-wrap">
+        <!-- Dois decks (dois players): na transição, o novo se dissolve por cima do antigo -->
+        <div class="deck is-front" id="deck-a"><div id="yt-player"></div></div>
+        <div class="deck" id="deck-b"><div id="yt-player-b"></div></div>
+        <!-- Camada transparente: evita os overlays de hover do YouTube; clique = tocar/pausar -->
+        <div id="video-shield" class="video-shield" title="Tocar/Pausar"></div>
+        <div class="video-placeholder">
+          <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          <span>Escolha uma música para começar</span>
+        </div>
+      </div>
+      <div class="qp-now">
+        <!-- Transição: a onda de cada música (a que sai e a que entra) se cruzando -->
+        <div class="mix-strip" id="mix-strip" aria-hidden="true">
+          <canvas id="mix-waves"></canvas>
+          <span class="mix-label"><i class="mix-dot" id="mix-dot-out"></i>saindo <i class="mix-dot" id="mix-dot-in"></i>entrando</span>
+        </div>
+        <div id="qp-title" class="qp-title"></div>
+        <div id="qp-artist" class="qp-artist"></div>
+      </div>
+      <!-- Abas: fila ou letra (a escolha fica salva) -->
+      <div class="qp-tabs" role="tablist">
+        <button role="tab" data-tab="queue">A seguir <span id="qp-count" class="qp-count"></span></button>
+        <button role="tab" data-tab="lyrics">Letra</button>
+      </div>
+      <label class="autoplay-row" id="autoplay-row">
+        <span>
+          <span class="autoplay-title">Autoplay</span>
+          <span class="autoplay-sub" id="autoplay-sub">Continua com músicas parecidas quando a fila acabar</span>
+        </span>
+        <span class="switch"><input type="checkbox" id="autoplay-toggle" /><span class="switch-track"></span></span>
+      </label>
+      <ol id="queue-list" class="queue-list"></ol>
+      <div id="lyrics" class="lyrics"></div>
+    </aside>
+
+    <!-- Barra "tocando agora" -->
+    <!-- Minimalista: capa + título + 3 controles; o resto aparece ao passar o mouse -->
+    <footer id="now-playing" class="now-playing is-empty">
+      <input id="seek" class="np-seek" type="range" min="0" max="1000" value="0" aria-label="Progresso" />
+
+      <div class="np-track">
+        <img id="np-thumb" alt="" />
+        <div class="np-text">
+          <div id="np-title" class="np-title">Nada tocando</div>
+          <div id="np-artist" class="np-artist"></div>
+        </div>
+      </div>
+
+      <div class="np-controls">
+        <button id="btn-shuffle" class="ctl ctl-sm" title="Aleatório" aria-label="Aleatório">
+          <svg viewBox="0 0 24 24" class="stroke"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
+        </button>
+        <button id="btn-prev" class="ctl" title="Anterior" aria-label="Anterior">
+          <svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 6.2v11.6a1 1 0 0 1-1.5.86l-9-5.8a1 1 0 0 1 0-1.72l9-5.8A1 1 0 0 1 20 6.2z"/></svg>
+        </button>
+        <button id="btn-play" class="ctl ctl-play" title="Tocar/Pausar" aria-label="Tocar/Pausar">
+          <svg viewBox="0 0 24 24" class="i-play"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z"/></svg>
+          <svg viewBox="0 0 24 24" class="i-pause"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+        </button>
+        <button id="btn-next" class="ctl" title="Próxima" aria-label="Próxima">
+          <svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 6.2v11.6a1 1 0 0 0 1.5.86l9-5.8a1 1 0 0 0 0-1.72l-9-5.8A1 1 0 0 0 4 6.2z"/></svg>
+        </button>
+        <button id="btn-repeat" class="ctl ctl-sm" title="Repetir" aria-label="Repetir">
+          <svg viewBox="0 0 24 24" class="stroke"><path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"/></svg>
+          <span class="badge">1</span>
+        </button>
+      </div>
+
+      <div class="np-right">
+        <span class="np-time"><span id="time-cur">0:00</span> / <span id="time-dur">0:00</span></span>
+        <button id="np-like" class="ctl ctl-sm" title="Curtir" aria-label="Curtir">
+          <svg viewBox="0 0 24 24" class="stroke heart"><path d="M12 20.5s-7.5-4.6-9.3-9.2C1.5 8.1 3.6 4.5 7.2 4.5c2 0 3.6 1.1 4.8 2.8 1.2-1.7 2.8-2.8 4.8-2.8 3.6 0 5.7 3.6 4.5 6.8-1.8 4.6-9.3 9.2-9.3 9.2z"/></svg>
+        </button>
+        <div class="np-volume">
+          <button id="btn-mute" class="ctl ctl-sm" title="Silenciar" aria-label="Silenciar">
+            <svg viewBox="0 0 24 24" class="i-vol"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="stroke" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+            <svg viewBox="0 0 24 24" class="i-mute"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="stroke" d="M16 9l6 6M22 9l-6 6"/></svg>
+          </button>
+          <input id="volume" type="range" min="0" max="100" value="80" aria-label="Volume" />
+        </div>
+        <a id="jam-stack" class="jam-stack" href="#/jam" hidden></a>
+        <button id="btn-jam" class="ctl ctl-sm" title="Jam" aria-label="Jam">
+          <svg viewBox="0 0 24 24" class="stroke"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.2a5 5 0 0 1 5.5 4.8"/></svg>
+          <span id="jam-count" class="jam-count"></span>
+        </button>
+        <button id="btn-lyrics" class="ctl ctl-sm" title="Letra" aria-label="Letra">
+          <svg viewBox="0 0 24 24" class="stroke"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v4M8.5 21.5h7"/></svg>
+        </button>
+        <button id="btn-viz" class="ctl ctl-sm" title="Visualizador" aria-label="Visualizador">
+          <svg viewBox="0 0 24 24" class="stroke"><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
+        </button>
+        <button id="btn-queue" class="ctl ctl-sm" title="Fila" aria-label="Fila">
+          <svg viewBox="0 0 24 24" class="stroke"><path d="M3 6h13M3 12h13M3 18h8"/><path d="M16 15v6l5-3z" fill="currentColor"/></svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+# Dependências (reinstaladas com `npm install`)
+node_modules/
+
+# Instaladores gerados por `npm run dist`
+dist/
+
+# Logs e arquivos do sistema
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
