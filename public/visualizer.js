@@ -504,6 +504,20 @@ export class Visualizer {
   // Música nova: esquece as batidas da anterior
   resetTempo() { this.#beatTimes = []; }
 
+  // Para a barra de progresso em ondas: n barras (0..1) espelhadas — graves no centro,
+  // agudos nas pontas — tiradas do mesmo espectro suavizado do visualizador
+  bars(n) {
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = Math.abs((i / Math.max(1, n - 1)) * 2 - 1);
+      out[i] = this.#levels[Math.min(HALF - 1, Math.round(t * (HALF - 1) * 0.85))];
+    }
+    return out;
+  }
+
+  // Última batida (horário) e a cor-alvo, que pula a cada batida e parte da cor da capa
+  get beatInfo() { return { at: this.#lastBeat, hue: this.#targetHue, listening: this.listening }; }
+
   // Para diagnóstico/testes
   get stats() {
     return { bpm: this.bpm, loud: +this.#loud.toFixed(3), hasAudio: this.hasAudio, listening: this.listening, fromDecks: this.#extFresh(), bass: +this.#bass.toFixed(3), energy: +this.#energy.toFixed(3), hue: Math.round(this.#hue), beat: +this.#beat.toFixed(2), particles: this.#particles.length };

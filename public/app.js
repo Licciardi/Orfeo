@@ -4,7 +4,8 @@ import { jam } from "./jam.js";
 import { deckFx } from "./deckfx.js";
 import { friends, formatCode } from "./friends.js";
 import { MixWaves } from "./mixwaves.js";
-import { safeThumb } from "./net.js";
+import { safeThumb, TAG_STYLES } from "./net.js";
+import { ProgressWave } from "./progresswave.js";
 
 const ICON_JAM = `<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.2a5 5 0 0 1 5.5 4.8"/></svg>`;
 
@@ -376,6 +377,17 @@ const routes = {
             </label>
           </div>
         </div>
+        <div class="setting setting-col">
+          <div><div class="setting-title">Tags</div><div class="setting-sub">Aparecem no seu perfil para os amigos. Escreva e escolha a animação (até 5).</div></div>
+          <div class="tags-row" id="my-tags"></div>
+          <form id="tag-form" class="tag-form">
+            <input id="tag-text" maxlength="24" placeholder="Ex.: 🎸 Roqueiro" autocomplete="off" />
+            <div class="tag-styles" id="tag-styles" role="radiogroup" aria-label="Animação da tag">
+              ${TAG_STYLES.map((s) => `<button type="button" role="radio" data-style="${s}" class="tag tag-${s}"><span>${TAG_LABELS[s]}</span></button>`).join("")}
+            </div>
+            <button class="pill">Adicionar</button>
+          </form>
+        </div>
       </section>
 
       <section class="profile-section">
@@ -444,6 +456,31 @@ const routes = {
     $("#accent-custom").addEventListener("input", (e) => applyAccent(e.target.value)); // pré-visualiza ao arrastar
     $("#accent-custom").addEventListener("change", (e) => profile.setAccent(e.target.value));
 
+    // Tags: escolher a animação, adicionar e remover
+    let tagStyle = "rgb";
+    const renderMyTags = () => {
+      $("#my-tags").innerHTML = profile.tags.length
+        ? profile.tags.map((t, i) => tagChip(t, `<button type="button" class="tag-x" data-del="${i}" aria-label="Remover tag">✕</button>`)).join("")
+        : `<span class="setting-sub">Nenhuma tag ainda.</span>`;
+      $("#my-tags").querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => {
+        profile.setTags(profile.tags.filter((_, k) => k !== +b.dataset.del));
+      }));
+      $("#tag-form").hidden = profile.tags.length >= 5;
+      view.querySelectorAll("#tag-styles [data-style]").forEach((b) => {
+        b.classList.toggle("is-picked", b.dataset.style === tagStyle);
+        b.setAttribute("aria-checked", b.dataset.style === tagStyle);
+      });
+    };
+    view.querySelectorAll("#tag-styles [data-style]").forEach((b) => b.addEventListener("click", () => { tagStyle = b.dataset.style; renderMyTags(); }));
+    $("#tag-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = $("#tag-text").value.replace(/\s+/g, " ").trim().slice(0, 24);
+      if (!text) return $("#tag-text").focus();
+      profile.setTags([...profile.tags, { text, style: tagStyle }]);
+      toast("Tag adicionada");
+    });
+    renderMyTags();
+
     // Transição entre músicas
     const renderMix = () => {
       view.querySelectorAll("#mix-mode button").forEach((b) => {
@@ -487,6 +524,13 @@ const routes = {
     });
     renderJamSection();
     renderFriendsBody();
+  },
+
+  // Perfil de um amigo (clicando nele na lista)
+  friend(code) {
+    if (!friends.list.some((f) => f.code === code)) { view.innerHTML = `<p class="empty">Amigo não encontrado.</p>`; return; }
+    view.innerHTML = `<div id="friend-profile" data-code="${esc(code)}"></div>`;
+    renderFriendProfile();
   },
 
   // Endereço antigo da Jam: agora ela mora dentro de Amigos
@@ -671,7 +715,7 @@ function renderFriendsBody() {
       : p.jam ? `<button class="pill" data-join="${esc(p.jam)}" data-name="${esc(who.name)}">Entrar na Jam</button>`
       : `<button class="pill ghost" data-invite="${esc(f.code)}" data-name="${esc(who.name)}">Chamar</button>`;
     return `
-      <li class="friend ${p.online ? "is-online" : ""}">
+      <li class="friend is-clickable ${p.online ? "is-online" : ""}" data-code="${esc(f.code)}" tabindex="0" title="Ver perfil de ${esc(who.name)}">
         <span class="friend-avatar">${memberAvatar(who, "avatar-md")}<span class="presence-dot"></span></span>
         <div class="friend-meta">
           <div class="friend-name">${esc(who.name)}${p.jam && !inMyJam ? ` <span class="friend-badge">numa Jam</span>` : ""}</div>
@@ -711,6 +755,11 @@ function renderFriendsBody() {
     ${pending ? `<ul class="friends-pending">${pending}</ul>` : ""}`;
 
   body.querySelector("[data-open-add]")?.addEventListener("click", openAddFriend);
+  body.querySelectorAll(".friend.is-clickable").forEach((li) => {
+    const open = (e) => { if (!e.target.closest("button")) location.hash = `#/friend/${li.dataset.code}`; };
+    li.addEventListener("click", open);
+    li.addEventListener("keydown", (e) => { if (e.key === "Enter") open(e); });
+  });
   body.querySelectorAll("[data-accept]").forEach((b) => b.addEventListener("click", () => friends.accept(b.dataset.accept)));
   body.querySelectorAll("[data-decline]").forEach((b) => b.addEventListener("click", () => friends.decline(b.dataset.decline)));
   body.querySelectorAll("[data-cancel]").forEach((b) => b.addEventListener("click", () => friends.cancelRequest(b.dataset.cancel)));
@@ -726,6 +775,88 @@ function renderFriendsBody() {
     } catch (err) { toast(err.message); }
     b.disabled = false;
   }));
+}
+
+// ---------- Tags animadas ----------
+const TAG_LABELS = { rgb: "RGB", glow: "Brilho", pulse: "Pulso", gradient: "Degradê" };
+const tagChip = (t, extra = "") => `<span class="tag tag-${esc(t.style)}"><span>${esc(t.text)}</span>${extra}</span>`;
+
+// ---------- Perfil de um amigo ----------
+function renderFriendProfile() {
+  const box = document.getElementById("friend-profile");
+  if (!box) return;
+  const code = box.dataset.code;
+  const f = friends.list.find((x) => x.code === code);
+  if (!f) { location.hash = "#/friends"; return; } // amizade desfeita
+  const p = friends.presence.get(code) || {};
+  const who = { name: p.name || f.name, photo: p.photo || f.photo };
+  const tags = p.tags || f.tags || [];
+  const top = p.top || f.top || [];
+  const inMyJam = p.jam && jam.status === "live" && p.jam === jam.code;
+  const listening = p.online && p.track;
+  const status = !p.online ? "Offline" : p.jam ? (inMyJam ? "Na sua Jam" : "Numa Jam") : listening ? (p.playing ? "Ouvindo agora" : "Pausado") : "Online";
+  const jamAction = !p.online ? ""
+    : inMyJam ? `<span class="friend-badge">na sua Jam</span>`
+    : p.jam ? `<button class="pill ghost" data-join="${esc(p.jam)}">Entrar na Jam</button>`
+    : `<button class="pill ghost" data-invite>Chamar para Jam</button>`;
+
+  box.innerHTML = `
+    <a href="#/friends" class="back-link">‹ Amigos</a>
+    <header class="fp-hero">
+      <span class="fp-avatar ${p.online ? "is-online" : ""} ${listening && p.playing ? "is-listening" : ""}">${memberAvatar(who, "avatar-xl")}</span>
+      <div class="fp-meta">
+        <div class="hero-kind">Amigo</div>
+        <h1>${esc(who.name)}</h1>
+        <div class="fp-status"><span class="fp-dot"></span>${status}</div>
+        ${tags.length ? `<div class="tags-row">${tags.map((t) => tagChip(t)).join("")}</div>` : ""}
+      </div>
+    </header>
+
+    <section class="profile-section">
+      <h2>Escutando agora</h2>
+      ${listening ? `
+        <div class="fp-now">
+          <img referrerpolicy="no-referrer" src="${esc(cardCover(p.track))}" data-vid="${esc(p.track.id)}" alt="" />
+          <div class="fp-now-meta">
+            <div class="fp-now-label">${p.playing ? `<span class="tcard-eq"><i></i><i></i><i></i></span> Tocando` : "Pausado"}</div>
+            <div class="fp-now-title">${esc(p.track.title)}</div>
+            <div class="fp-now-artist">${esc(p.track.artist)}</div>
+            <div class="fp-now-actions">
+              <button class="pill" data-listen>▶ Ouvir também</button>
+              ${jamAction}
+            </div>
+          </div>
+        </div>`
+      : `<p class="empty">${p.online ? "Não está ouvindo nada agora." : "Quando estiver online e ouvindo algo, aparece aqui."}</p>
+         ${p.online ? `<div class="fp-now-actions">${jamAction}</div>` : ""}`}
+    </section>
+
+    <section class="profile-section">
+      <h2>Mais ouvidos</h2>
+      ${top.length ? `<div class="artists">${top.map((a) => `
+        <div class="artist">
+          <div class="artist-img">${a.thumb ? `<img referrerpolicy="no-referrer" src="${esc(a.thumb)}" alt="" loading="lazy" />` : "<span>♪</span>"}</div>
+          <div class="artist-name">${esc(a.name)}</div>
+          <div class="artist-sub">${a.plays} ${a.plays === 1 ? "vez" : "vezes"}</div>
+        </div>`).join("")}</div>`
+      : `<p class="empty">Ainda não dá para ver o que ${esc(who.name)} mais ouve.</p>`}
+    </section>
+
+    <button class="link-btn fp-remove" data-remove>Desfazer amizade</button>`;
+
+  box.querySelector("[data-listen]")?.addEventListener("click", () => { player.playList([p.track], 0); toast(`Tocando “${p.track.title}”`); });
+  box.querySelector("[data-join]")?.addEventListener("click", (e) => joinFriendJam(e.target.dataset.join, who.name));
+  box.querySelector("[data-invite]")?.addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    try {
+      if (!jam.active) await jam.host();
+      if (friends.invite(code)) toast(`Convite enviado para ${who.name}`);
+    } catch (err) { toast(err.message); }
+    e.target.disabled = false;
+  });
+  box.querySelector("[data-remove]").addEventListener("click", () => {
+    if (confirm(`Desfazer amizade com ${who.name}?`)) friends.remove(code);
+  });
 }
 
 async function joinFriendJam(code, name) {
@@ -761,10 +892,10 @@ function renderFriendsNav() {
   if (friends.incoming.length) $("#friends-online").textContent = "•";
 }
 
-friends.on("change", () => { renderFriendsNav(); renderFriendsBody(); });
+friends.on("change", () => { renderFriendsNav(); renderFriendsBody(); renderFriendProfile(); });
 friends.on("toast", toast);
 friends.on("invite", showInvite);
-jam.on("change", () => renderFriendsBody());
+jam.on("change", () => { renderFriendsBody(); renderFriendProfile(); });
 
 // ---------- Perfil: avatar, chip do menu e cor de destaque ----------
 function avatarInner() {
@@ -821,16 +952,20 @@ function collectionView({ title, kind, tracks, coverHtml, playlistId }) {
 
 // ---------- Router (hash) ----------
 let cleanupRoute = null; // rotas podem devolver uma função de limpeza (ex.: parar o canvas)
+let lastRendered = null;
 function render() {
+  // Redesenhar a mesma tela (ex.: curtiu algo, adicionou uma tag) mantém a rolagem onde estava
+  const sameScreen = lastRendered === location.hash, keepScroll = view.scrollTop;
+  lastRendered = location.hash;
   cleanupRoute?.();
   cleanupRoute = null;
   const [, name = "", arg] = location.hash.replace(/^#/, "").split("/");
   const route = routes[name || "home"] ? name || "home" : "home";
   cleanupRoute = routes[route](arg) || null;
-  document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === route));
+  document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === route || (route === "friend" && a.dataset.route === "friends")));
   $("#profile-chip").classList.toggle("active", route === "profile");
   document.querySelectorAll(".sidebar-playlists a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === location.hash));
-  view.scrollTop = 0;
+  view.scrollTop = sameScreen ? keepScroll : 0;
 }
 addEventListener("hashchange", render);
 
@@ -1112,6 +1247,12 @@ $("#btn-viz").addEventListener("click", () => {
 });
 $("#btn-queue").addEventListener("click", () => document.querySelector(".app").classList.toggle("queue-hidden"));
 seek.addEventListener("input", () => { seeking = true; setSeek(seek.value); });
+// Progresso em ondas de barras (dança com a música e muda de cor a cada batida)
+new ProgressWave($("#np-wave"), () => {
+  let progress = seek.value / 1000;
+  if (!seeking) { const p = player.progress(); progress = p.duration ? p.current / p.duration : 0; }
+  return { progress, playing: player.playing, trackId: player.current?.id ?? "", bars: (n) => viz.bars(n), beat: viz.beatInfo };
+});
 seek.addEventListener("change", () => { player.seek((seek.value / 1000) * player.progress().duration); seeking = false; });
 const vol = $("#volume");
 vol.value = player.volume;

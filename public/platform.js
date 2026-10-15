@@ -100,6 +100,7 @@ class Profile extends Emitter {
   name = Storage.get("profile.name", "");
   photo = Storage.get("profile.photo", "");    // data URL JPEG 256x256
   accent = Storage.get("profile.accent", "#ff4d6d");
+  tags = Storage.get("profile.tags", []);          // [{ text, style }] — até 5, aparecem para os amigos
 
   setName(name) { this.name = name.trim().slice(0, 30); Storage.set("profile.name", this.name); this.emit("change"); }
   setPhoto(dataUrl) {
@@ -108,6 +109,7 @@ class Profile extends Emitter {
     this.emit("change");
   }
   setAccent(color) { this.accent = color; Storage.set("profile.accent", color); this.emit("change"); }
+  setTags(tags) { this.tags = tags.slice(0, 5); Storage.set("profile.tags", this.tags); this.emit("change"); }
 
   get initials() {
     const letters = (this.name || "Você").split(/\s+/).map((w) => w.match(/\p{L}/u)?.[0]).filter(Boolean);

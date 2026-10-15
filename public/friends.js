@@ -17,9 +17,9 @@
 //   { type: "presence", track, playing, jam }             o que está tocando / Jam aberta
 //   { type: "profile", name, photo }                       mudou nome/foto
 //   { type: "friend-decline" } | { type: "unfriend" } | { type: "jam-invite", jam }
-import { player, profile, Storage, Emitter } from "./platform.js";
+import { player, profile, history, Storage, Emitter } from "./platform.js";
 import { jam } from "./jam.js";
-import { ALPHABET, randomCode, randomKey, loadPeerJS, openPeer, str, cleanName, safePhoto, cleanTrack } from "./net.js";
+import { ALPHABET, randomCode, randomKey, loadPeerJS, openPeer, str, cleanName, safePhoto, cleanTrack, cleanTags, cleanTopArtists } from "./net.js";
 
 const PREFIX = "orfeo-u-";
 const RETRY_MS = 30_000;     // tenta reconectar amigos / reenviar pedidos a cada 30 s
@@ -224,6 +224,8 @@ class Friends extends Emitter {
     f.name = cleanName(msg.name);
     const photo = safePhoto(msg.photo);
     f.photo = photo.length < STORE_PHOTO_MAX ? photo : ""; // o resto fica só na memória
+    if ("tags" in msg) f.tags = cleanTags(msg.tags);     // guardados para ver o perfil mesmo offline
+    if ("top" in msg) f.top = cleanTopArtists(msg.top);
     this.#save();
   }
 
@@ -235,11 +237,21 @@ class Friends extends Emitter {
     if ("track" in msg) p.track = cleanTrack(msg.track);
     if ("playing" in msg) p.playing = !!msg.playing;
     if ("jam" in msg) p.jam = /^[A-Z0-9]{6}$/.test(String(msg.jam)) ? String(msg.jam) : null;
+    if ("tags" in msg) p.tags = cleanTags(msg.tags);
+    if ("top" in msg) p.top = cleanTopArtists(msg.top);
     this.presence.set(code, p);
   }
 
   // ---------- O que mando para os amigos ----------
-  #me() { return { name: cleanName(profile.name || "Amigo"), photo: safePhoto(profile.photo) }; }
+  // Perfil que os amigos veem: nome, foto, tags e artistas mais ouvidos
+  #me() {
+    return {
+      name: cleanName(profile.name || "Amigo"),
+      photo: safePhoto(profile.photo),
+      tags: cleanTags(profile.tags),
+      top: cleanTopArtists(history.topArtists(5)),
+    };
+  }
 
   #presence() {
     const t = this.share ? player.current : null;

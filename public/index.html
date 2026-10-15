@@ -8,11 +8,11 @@
 </head>
 <body>
   <!-- Só aparece no app desktop: área para arrastar a janela -->
-  <div class="titlebar"><span class="logo">◉</span> Orfeo</div>
+  <div class="titlebar"><svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.6 20.6h4.8M8 6.8C5.3 8.2 4.9 13.1 6.4 17c.6 1.6 1.6 2.6 3.3 3.4M16 6.8c2.7 1.4 3.1 6.3 1.6 10.2-.6 1.6-1.6 2.6-3.3 3.4M8 6.8c1-.8.8-2.1-.4-2.3M16 6.8c-1-.8-.8-2.1.4-2.3M6.6 8.4h10.8M10.4 8.8v11M12 8.8v11M13.6 8.8v11"/></svg> Orfeo</div>
   <div class="app">
     <!-- Barra lateral: navegação + biblioteca -->
     <aside class="sidebar">
-      <div class="brand"><span class="logo">◉</span> Orfeo</div>
+      <div class="brand"><svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.6 20.6h4.8M8 6.8C5.3 8.2 4.9 13.1 6.4 17c.6 1.6 1.6 2.6 3.3 3.4M16 6.8c2.7 1.4 3.1 6.3 1.6 10.2-.6 1.6-1.6 2.6-3.3 3.4M8 6.8c1-.8.8-2.1-.4-2.3M16 6.8c-1-.8-.8-2.1.4-2.3M6.6 8.4h10.8M10.4 8.8v11M12 8.8v11M13.6 8.8v11"/></svg> Orfeo</div>
       <nav class="nav">
         <a href="#/" data-route="home">⌂ Início</a>
         <a href="#/search" data-route="search">⌕ Buscar</a>
@@ -76,8 +76,6 @@
     <!-- Barra "tocando agora" -->
     <!-- Minimalista: capa + título + 3 controles; o resto aparece ao passar o mouse -->
     <footer id="now-playing" class="now-playing is-empty">
-      <input id="seek" class="np-seek" type="range" min="0" max="1000" value="0" aria-label="Progresso" />
-
       <div class="np-track">
         <img id="np-thumb" referrerpolicy="no-referrer" alt="" />
         <div class="np-text">
@@ -86,6 +84,7 @@
         </div>
       </div>
 
+      <div class="np-center">
       <div class="np-controls">
         <button id="btn-shuffle" class="ctl ctl-sm" title="Aleatório" aria-label="Aleatório">
           <svg viewBox="0 0 24 24" class="stroke"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
@@ -105,9 +104,18 @@
           <span class="badge">1</span>
         </button>
       </div>
+      <!-- Progresso em ondas de barras: dança com a música e muda de cor a cada batida -->
+      <div class="np-progress">
+        <span id="time-cur" class="np-time-cur">0:00</span>
+        <div class="np-wave">
+          <canvas id="np-wave"></canvas>
+          <input id="seek" class="np-seek" type="range" min="0" max="1000" value="0" aria-label="Progresso da música" />
+        </div>
+        <span id="time-dur" class="np-time-dur">0:00</span>
+      </div>
+      </div>
 
       <div class="np-right">
-        <span class="np-time"><span id="time-cur">0:00</span> / <span id="time-dur">0:00</span></span>
         <button id="np-like" class="ctl ctl-sm" title="Curtir" aria-label="Curtir">
           <svg viewBox="0 0 24 24" class="stroke heart"><path d="M12 20.5s-7.5-4.6-9.3-9.2C1.5 8.1 3.6 4.5 7.2 4.5c2 0 3.6 1.1 4.8 2.8 1.2-1.7 2.8-2.8 4.8-2.8 3.6 0 5.7 3.6 4.5 6.8-1.8 4.6-9.3 9.2-9.3 9.2z"/></svg>
         </button>

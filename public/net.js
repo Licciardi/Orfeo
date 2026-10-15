@@ -66,3 +66,23 @@ export function cleanTrack(t) {
   return track;
 }
 export const cleanTracks = (list) => (Array.isArray(list) ? list.slice(0, 500).map(cleanTrack).filter(Boolean) : []);
+
+// Tags do perfil: até 5, texto curto, só estilos de animação conhecidos
+export const TAG_STYLES = ["rgb", "glow", "pulse", "gradient"];
+export function cleanTags(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 5).map((t) => ({
+    text: str(t?.text, 24).replace(/\s+/g, " ").trim(),
+    style: TAG_STYLES.includes(t?.style) ? t.style : "glow",
+  })).filter((t) => t.text);
+}
+
+// Artistas mais ouvidos de um amigo: até 5, nome curto, imagem só de host seguro
+export function cleanTopArtists(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 5).map((a) => ({
+    name: str(a?.name, 60).trim(),
+    plays: Math.max(0, Math.min(99999, Math.floor(Number(a?.plays) || 0))),
+    thumb: safeThumb(a?.thumb),
+  })).filter((a) => a.name);
+}
