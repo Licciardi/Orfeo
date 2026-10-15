@@ -4,9 +4,9 @@ import { jam } from "./jam.js";
 import { deckFx } from "./deckfx.js";
 import { friends, formatCode } from "./friends.js";
 import { MixWaves } from "./mixwaves.js";
+import { safeThumb } from "./net.js";
 
 const ICON_JAM = `<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.2a5 5 0 0 1 5.5 4.8"/></svg>`;
-const ICON_KEY = `<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/></svg>`;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -29,7 +29,7 @@ function trackList(tracks, ctx = {}) {
   return `<ol class="tracks">${tracks.map((t, i) => `
     <li class="track ${t.id === cur ? "is-current" : ""}" data-i="${i}">
       <span class="t-num">${i + 1}</span>
-      <img src="${esc(t.thumb)}" data-vid="${esc(t.id)}" alt="" loading="lazy" />
+      <img referrerpolicy="no-referrer" src="${esc(t.thumb)}" data-vid="${esc(t.id)}" alt="" loading="lazy" />
       <div class="t-meta"><div class="t-title">${esc(t.title)}</div><div class="t-artist">${esc(t.artist)}</div></div>
       <span class="t-dur">${esc(t.duration || "")}</span>
       <div class="t-actions">
@@ -53,6 +53,76 @@ function bindTrackList(root, tracks, ctx = {}) {
       if (act === "queue") { player.addToQueue(jam.active ? { ...t, addedBy: jam.myId } : t); toast("Adicionada à fila"); }
       if (act === "add") pickPlaylist(t, b);
       if (act === "remove") library.removeFromPlaylist(ctx.playlistId, t.id);
+    }));
+  });
+}
+
+// ---------- Cards 3D dos resultados da busca ----------
+// Inspirado no "Pure CSS parallax card on :hover" (Ana Tudor): o card inclina em 3D na direção do
+// mouse, o texto flutua à frente (parallax) e um brilho corre pela superfície. No original a
+// inclinação vem de uma grade de "armadilhas" invisíveis em CSS; aqui os cards têm botões
+// clicáveis, então a posição do mouse vira --di/--dj (de -1 a 1) por JS — mesmas fórmulas no CSS.
+const ICON_PLAY = `<svg viewBox="0 0 24 24"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z"/></svg>`;
+
+// Capa em resolução maior para o card (a lista usa miniaturas pequenas)
+function cardCover(t) {
+  const safe = safeThumb(t.thumb);
+  if (!safe) return `https://i.ytimg.com/vi/${t.id}/hqdefault.jpg`;
+  return safe.replace(/=w\d+-h\d+[^/]*$/, "=w544-h544-l90-rj").replace(/\/mqdefault\.jpg$/, "/hqdefault.jpg");
+}
+
+function trackCards(tracks, ctx = {}) {
+  if (!tracks.length) return `<p class="empty">${ctx.empty || "Nada encontrado."}</p>`;
+  const cur = player.current?.id;
+  return `<div class="tcards">${tracks.map((t, i) => `
+    <div class="tcard-scene">
+      <article class="tcard ${t.id === cur ? "is-current" : ""}" data-i="${i}" data-id="${esc(t.id)}" tabindex="0"
+        aria-label="${esc(t.title)} — ${esc(t.artist)}">
+        <div class="tcard-face"><img class="tcard-img" referrerpolicy="no-referrer" src="${esc(cardCover(t))}" data-vid="${esc(t.id)}" alt="" loading="lazy" /></div>
+        <span class="tcard-now"><span class="tcard-eq"><i></i><i></i><i></i></span>Tocando</span>
+        <div class="tcard-actions">
+          <button class="tcard-btn" data-act="like" title="Curtir">${library.isLiked(t.id) ? "♥" : "♡"}</button>
+          <button class="tcard-btn" data-act="queue" title="Adicionar à fila">⊕</button>
+          <button class="tcard-btn" data-act="add" title="Adicionar à playlist">＋</button>
+        </div>
+        <div class="tcard-text">
+          <h3>${esc(t.title)}</h3>
+          <p>${esc(t.artist)}${t.duration ? ` <span>• ${esc(t.duration)}</span>` : ""}</p>
+        </div>
+        <button class="tcard-play" data-act="play" title="Tocar" aria-label="Tocar ${esc(t.title)}">${ICON_PLAY}</button>
+      </article>
+    </div>`).join("")}</div>`;
+}
+
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+
+function bindTrackCards(root, tracks) {
+  root.querySelectorAll(".tcard").forEach((card) => {
+    const i = +card.dataset.i, t = tracks[i];
+    const scene = card.parentElement;
+    // Inclinação 3D: posição do mouse na cena → -1..1 nos dois eixos
+    scene.addEventListener("pointermove", (e) => {
+      if (reduceMotion.matches) return;
+      const r = scene.getBoundingClientRect();
+      card.style.setProperty("--di", (((e.clientX - r.left) / r.width) * 2 - 1).toFixed(3));
+      card.style.setProperty("--dj", (1 - ((e.clientY - r.top) / r.height) * 2).toFixed(3));
+      card.classList.add("is-tilted");
+    });
+    scene.addEventListener("pointerleave", () => {
+      card.style.setProperty("--di", 0);
+      card.style.setProperty("--dj", 0);
+      card.classList.remove("is-tilted");
+    });
+    // Clicar no card (fora dos botões) ou Enter: toca a partir dele
+    card.addEventListener("click", (e) => { if (!e.target.closest("[data-act]")) player.playList(tracks, i); });
+    card.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target === card) player.playList(tracks, i); });
+    card.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const act = b.dataset.act;
+      if (act === "play") player.playList(tracks, i);
+      if (act === "like") { library.toggleLike(t); b.textContent = library.isLiked(t.id) ? "♥" : "♡"; }
+      if (act === "queue") { player.addToQueue(jam.active ? { ...t, addedBy: jam.myId } : t); toast("Adicionada à fila"); }
+      if (act === "add") pickPlaylist(t, b);
     }));
   });
 }
@@ -86,7 +156,7 @@ function newPlaylist() {
 function card(href, img, title, sub) {
   return `<a class="card" href="${href}"><div class="card-img">${img}</div><div class="card-title">${esc(title)}</div><div class="card-sub">${esc(sub)}</div></a>`;
 }
-const cover = (pl) => pl.tracks[0] ? `<img src="${esc(pl.tracks[0].thumb)}" alt="" />` : `<span>♪</span>`;
+const cover = (pl) => pl.tracks[0] ? `<img referrerpolicy="no-referrer" src="${esc(pl.tracks[0].thumb)}" alt="" />` : `<span>♪</span>`;
 
 // ---------- Views (rotas) ----------
 const routes = {
@@ -101,8 +171,9 @@ const routes = {
         ${library.playlists.map((p) => card(`#/playlist/${p.id}`, cover(p), p.name, `${p.tracks.length} faixas`)).join("")}
       </div></section>`;
     const recent = $("#recent");
-    recent.innerHTML = trackList(history.items.slice(0, 10), { empty: "Toque algo pela busca para começar." });
-    bindTrackList(recent, history.items.slice(0, 10));
+    const recentTracks = history.items.slice(0, 12);
+    recent.innerHTML = trackCards(recentTracks, { empty: "Toque algo pela busca para começar." });
+    bindTrackCards(recent, recentTracks);
   },
 
   search() {
@@ -140,8 +211,8 @@ const routes = {
       try {
         const link = /youtu\.?be/.test(text) ? await Search.fromLink(text) : null;
         const tracks = link ? [link] : await Search.query(text, type);
-        out.innerHTML = trackList(tracks, { empty: "Nada encontrado." });
-        bindTrackList(out, tracks);
+        out.innerHTML = trackCards(tracks, { empty: "Nada encontrado." });
+        bindTrackCards(out, tracks);
       } catch (err) {
         out.innerHTML = `<p class="empty error">${esc(err.message)}</p>`;
       }
@@ -248,7 +319,7 @@ const routes = {
         <h2>Mais ouvidos recentemente</h2>
         ${top.length ? `<div class="artists">${top.map((a) => `
           <div class="artist">
-            <div class="artist-img">${a.thumb ? `<img src="${esc(a.thumb)}" alt="" loading="lazy" />` : "<span>♪</span>"}</div>
+            <div class="artist-img">${a.thumb ? `<img referrerpolicy="no-referrer" src="${esc(a.thumb)}" alt="" loading="lazy" />` : "<span>♪</span>"}</div>
             <div class="artist-name">${esc(a.name)}</div>
             <div class="artist-sub">${a.plays} ${a.plays === 1 ? "vez" : "vezes"}</div>
           </div>`).join("")}</div>`
@@ -295,9 +366,11 @@ const routes = {
     renderMix();
   },
 
+  // Amigos + Jam no mesmo lugar: painel da Jam no topo, seu código e a lista de amigos embaixo
   friends() {
     view.innerHTML = `
       <h1>Amigos</h1>
+      <section id="jam-section"></section>
       <div class="friends-top">
         <div class="friend-code-card">
           <div>
@@ -322,83 +395,12 @@ const routes = {
       try { await friends.add(input.value); input.value = ""; toast("Pedido enviado"); }
       catch (err) { toast(err.message); }
     });
+    renderJamSection();
     renderFriendsBody();
   },
 
-  jam() {
-    if (!jam.active) {
-      view.innerHTML = `
-        <h1>Jam</h1>
-        <p class="jam-lead">Ouça junto com seus amigos: todo mundo escuta a mesma música, no mesmo segundo,
-          e qualquer um pode pausar, pular ou adicionar músicas à fila.</p>
-        <div class="jam-cards">
-          <div class="jam-card">
-            <div class="jam-card-icon">${ICON_JAM}</div>
-            <h3>Começar uma Jam</h3>
-            <p>Você vira o anfitrião e recebe um código para mandar pro seu amigo.</p>
-            <button id="jam-host" class="pill">Iniciar Jam</button>
-          </div>
-          <div class="jam-card">
-            <div class="jam-card-icon">${ICON_KEY}</div>
-            <h3>Entrar numa Jam</h3>
-            <p>Digite o código que seu amigo mandou.</p>
-            <form id="jam-join" class="jam-join">
-              <input id="jam-code" maxlength="7" placeholder="ABC123" autocomplete="off" spellcheck="false" />
-              <button class="pill">Entrar</button>
-            </form>
-          </div>
-        </div>
-        <p class="jam-hint">Dica: coloque seu nome e foto no <a href="#/profile">perfil</a> para seus amigos saberem quem está na Jam.</p>`;
-      $("#jam-host").addEventListener("click", async (e) => {
-        e.target.disabled = true;
-        try { await jam.host(); } catch (err) { toast(err.message); }
-      });
-      $("#jam-join").addEventListener("submit", async (e) => {
-        e.preventDefault();
-        try { await jam.join($("#jam-code").value); } catch (err) { toast(err.message); }
-      });
-      return;
-    }
-
-    if (jam.status === "connecting") {
-      view.innerHTML = `<h1>Jam</h1><div class="jam-connecting"><span class="jam-spinner"></span>${jam.role === "host" ? "Criando a Jam…" : "Entrando na Jam…"}</div>`;
-      return;
-    }
-
-    const isHost = jam.role === "host";
-    view.innerHTML = `
-      <div class="jam-live">
-        <div class="jam-badge"><span class="jam-dot"></span> Jam ao vivo</div>
-        ${isHost ? `
-          <h1>Sua Jam</h1>
-          <p class="jam-lead">Mande este código pro seu amigo. Ele abre o Orfeo, vai em <b>Jam → Entrar</b> e digita:</p>
-          <div class="jam-code-row">
-            <div class="jam-code">${esc(jam.code.slice(0, 3))}<span>${esc(jam.code.slice(3))}</span></div>
-            <button id="jam-copy" class="pill ghost">Copiar código</button>
-          </div>`
-        : `
-          <h1>Jam de ${esc(jam.hostName || "um amigo")}</h1>
-          <p class="jam-lead">Você está ouvindo junto. Pode pausar, pular e adicionar músicas — muda pra todo mundo.</p>`}
-        <h2>Na Jam (${jam.members.length})</h2>
-        <ul class="jam-members">
-          ${jam.members.map((m) => `
-            <li>
-              ${memberAvatar(m)}
-              <span class="jam-member-name">${esc(m.name)}</span>
-              ${m.host ? `<span class="jam-tag">anfitrião</span>` : ""}
-            </li>`).join("")}
-        </ul>
-        ${isHost && jam.members.length === 1 ? `<p class="empty">Esperando alguém entrar…</p>` : ""}
-        <button id="jam-leave" class="pill ghost jam-leave">${isHost ? "Encerrar Jam" : "Sair da Jam"}</button>
-      </div>`;
-    $("#jam-copy")?.addEventListener("click", async () => {
-      try { await navigator.clipboard.writeText(jam.code); toast("Código copiado"); }
-      catch { toast(`Código: ${jam.code}`); }
-    });
-    $("#jam-leave").addEventListener("click", () => {
-      if (!isHost || confirm("Encerrar a Jam para todo mundo?")) jam.leave();
-    });
-  },
+  // Endereço antigo da Jam: agora ela mora dentro de Amigos
+  jam() { location.replace("#/friends"); },
 
   // Visualizador em Canvas. Fica na área central para o vídeo continuar visível à direita.
   visualizer() {
@@ -481,7 +483,7 @@ function renderJamIndicator() {
   const live = jam.status === "live";
   btn.classList.toggle("on", live);
   $("#jam-count").textContent = live && jam.members.length > 1 ? jam.members.length : "";
-  btn.title = live ? `Jam ao vivo (${jam.members.length})` : "Jam";
+  btn.title = live ? `Jam ao vivo (${jam.members.length})` : "Amigos e Jam";
   // Fotos de quem está na Jam, sobrepostas, sempre visíveis na barra
   const stack = $("#jam-stack");
   const shown = live ? jam.members.slice(0, 4) : [];
@@ -493,9 +495,87 @@ function renderJamIndicator() {
 jam.on("change", () => {
   renderJamIndicator();
   renderQueue(); // atualiza as fotinhas de "quem adicionou"
-  if (location.hash === "#/jam") render();
+  renderJamSection(); // o painel da Jam fica dentro de Amigos
 });
 jam.on("toast", toast);
+
+// ---------- Painel da Jam (dentro de Amigos) ----------
+function renderJamSection() {
+  const box = document.getElementById("jam-section");
+  if (!box) return;
+
+  if (!jam.active) {
+    box.innerHTML = `
+      <div class="jam-panel">
+        <div class="jam-panel-head">
+          <div class="jam-card-icon">${ICON_JAM}</div>
+          <div>
+            <h2>Jam</h2>
+            <p>Ouçam juntos: a mesma música, no mesmo segundo. Todo mundo pode pausar, pular e adicionar músicas.</p>
+          </div>
+        </div>
+        <div class="jam-panel-actions">
+          <button id="jam-host" class="pill">Iniciar Jam</button>
+          <span class="jam-or">ou</span>
+          <form id="jam-join" class="jam-join">
+            <input id="jam-code" maxlength="7" placeholder="Código da Jam" autocomplete="off" spellcheck="false" />
+            <button class="pill ghost">Entrar</button>
+          </form>
+        </div>
+        ${profile.name ? "" : `<p class="jam-hint">Dica: coloque seu nome e foto no <a href="#/profile">perfil</a> para seus amigos saberem quem está na Jam.</p>`}
+      </div>`;
+    $("#jam-host").addEventListener("click", async (e) => {
+      e.target.disabled = true;
+      try { await jam.host(); } catch (err) { toast(err.message); e.target.disabled = false; }
+    });
+    $("#jam-join").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try { await jam.join($("#jam-code").value); } catch (err) { toast(err.message); }
+    });
+    return;
+  }
+
+  if (jam.status === "connecting") {
+    box.innerHTML = `<div class="jam-panel"><div class="jam-connecting"><span class="jam-spinner"></span>${jam.role === "host" ? "Criando a Jam…" : "Entrando na Jam…"}</div></div>`;
+    return;
+  }
+
+  const isHost = jam.role === "host";
+  box.innerHTML = `
+    <div class="jam-panel is-live">
+      <div class="jam-live-top">
+        <div>
+          <div class="jam-badge"><span class="jam-dot"></span> Jam ao vivo</div>
+          <h2>${isHost ? "Sua Jam" : `Jam de ${esc(jam.hostName || "um amigo")}`}</h2>
+          <p>${isHost
+            ? "Chame um amigo pela lista abaixo, ou mande o código para ele entrar:"
+            : "Você está ouvindo junto. Pausar, pular e adicionar músicas muda pra todo mundo."}</p>
+        </div>
+        <button id="jam-leave" class="pill ghost">${isHost ? "Encerrar Jam" : "Sair da Jam"}</button>
+      </div>
+      ${isHost ? `
+        <div class="jam-code-row">
+          <div class="jam-code">${esc(jam.code.slice(0, 3))}<span>${esc(jam.code.slice(3))}</span></div>
+          <button id="jam-copy" class="pill ghost">Copiar código</button>
+        </div>` : ""}
+      <div class="jam-people">
+        ${jam.members.map((m) => `
+          <span class="jam-person">
+            ${memberAvatar(m, "avatar-sm")}
+            <span>${esc(m.name)}</span>
+            ${m.host ? `<span class="jam-tag">anfitrião</span>` : ""}
+          </span>`).join("")}
+        ${isHost && jam.members.length === 1 ? `<span class="jam-waiting">Esperando alguém entrar…</span>` : ""}
+      </div>
+    </div>`;
+  $("#jam-copy")?.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(jam.code); toast("Código copiado"); }
+    catch { toast(`Código: ${jam.code}`); }
+  });
+  $("#jam-leave").addEventListener("click", () => {
+    if (!isHost || confirm("Encerrar a Jam para todo mundo?")) jam.leave();
+  });
+}
 
 // ---------- Amigos ----------
 // Lista (re-renderizada quando algo muda, sem mexer no campo de adicionar)
@@ -527,7 +607,7 @@ function renderFriendsBody() {
           <div class="friend-name">${esc(who.name)}</div>
           <div class="friend-status">${status}</div>
         </div>
-        ${p.online && p.track ? `<img class="friend-track" src="${esc(p.track.thumb)}" data-vid="${esc(p.track.id)}" alt="" title="${esc(p.track.title)}" />` : ""}
+        ${p.online && p.track ? `<img class="friend-track" referrerpolicy="no-referrer" src="${esc(p.track.thumb)}" data-vid="${esc(p.track.id)}" alt="" title="${esc(p.track.title)}" />` : ""}
         <div class="friend-actions">
           ${action}
           <button class="icon-btn" data-remove="${esc(f.code)}" data-name="${esc(who.name)}" title="Desfazer amizade">✕</button>
@@ -593,11 +673,11 @@ function renderFriendsBody() {
 
 async function joinFriendJam(code, name) {
   if (jam.active) {
-    if (jam.code === code) return (location.hash = "#/jam");
+    if (jam.code === code) return (location.hash = "#/friends");
     if (!confirm(`Sair da Jam atual e entrar na de ${name}?`)) return;
     jam.leave(true);
   }
-  try { await jam.join(code); location.hash = "#/jam"; }
+  try { await jam.join(code); location.hash = "#/friends"; }
   catch (err) { toast(err.message); }
 }
 
@@ -706,7 +786,11 @@ $("#new-playlist").addEventListener("click", () => { const p = newPlaylist(); if
 
 // Re-renderiza a view atual quando os dados mudam (exceto a busca, para não perder resultados)
 library.on("change", () => { renderSidebar(); if (!/^#\/(search|visualizer)/.test(location.hash)) render(); updateNowPlaying(); });
-history.on("change", () => { if (["", "#/", "#"].includes(location.hash)) render(); });
+// Início: só redesenha se ainda não tinha nada tocado (senão o card clicado "pularia" para o
+// primeiro lugar debaixo do mouse); a ordem nova aparece na próxima vez que abrir o Início
+history.on("change", () => {
+  if (["", "#/", "#"].includes(location.hash) && !document.querySelector("#recent .tcard")) render();
+});
 
 // ---------- Barra "tocando agora" ----------
 const btnPlay = $("#btn-play"), seek = $("#seek");
@@ -726,6 +810,7 @@ function updateNowPlaying() {
   rep.classList.toggle("repeat-one", player.repeat === "one");
   document.title = t ? `${t.title} • Orfeo` : "Orfeo";
   document.querySelectorAll(".track").forEach((li) => li.classList.remove("is-current"));
+  document.querySelectorAll(".tcard").forEach((c) => c.classList.toggle("is-current", !!t && c.dataset.id === t.id));
 }
 
 // ---------- Cor da capa ----------
@@ -885,7 +970,7 @@ function renderQueue() {
     return `${k === firstAuto ? `<li class="q-divider">Tocando automaticamente</li>` : ""}
     <li data-i="${i}" class="${track.auto ? "is-auto" : ""}">
       <span class="q-thumb">
-        <img src="${esc(track.thumb)}" data-vid="${esc(track.id)}" alt="" loading="lazy" />
+        <img referrerpolicy="no-referrer" src="${esc(track.thumb)}" data-vid="${esc(track.id)}" alt="" loading="lazy" />
         ${by ? `<span class="q-by" title="Adicionada por ${esc(by.name)}">${memberAvatar(by, "avatar-xxs")}</span>` : ""}
       </span>
       <div><div class="t-title">${esc(track.title)}</div><div class="t-artist">${esc(track.artist)}</div></div>
@@ -955,7 +1040,7 @@ $("#btn-lyrics").addEventListener("click", () => {
   app.classList.remove("queue-hidden");
   setPanelTab("lyrics");
 });
-$("#btn-jam").addEventListener("click", () => (location.hash = "#/jam"));
+$("#btn-jam").addEventListener("click", () => (location.hash = "#/friends"));
 $("#btn-viz").addEventListener("click", () => {
   location.hash = location.hash === "#/visualizer" ? "#/" : "#/visualizer";
 });

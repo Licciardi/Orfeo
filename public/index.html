@@ -18,7 +18,6 @@
         <a href="#/search" data-route="search">⌕ Buscar</a>
         <a href="#/library" data-route="library">▤ Biblioteca</a>
         <a href="#/visualizer" data-route="visualizer">◎ Visualizador</a>
-        <a href="#/jam" data-route="jam">⚇ Jam</a>
         <a href="#/friends" data-route="friends">☺ Amigos <span id="friends-online" class="nav-count"></span></a>
       </nav>
       <div class="library-head">
@@ -80,7 +79,7 @@
       <input id="seek" class="np-seek" type="range" min="0" max="1000" value="0" aria-label="Progresso" />
 
       <div class="np-track">
-        <img id="np-thumb" alt="" />
+        <img id="np-thumb" referrerpolicy="no-referrer" alt="" />
         <div class="np-text">
           <div id="np-title" class="np-title">Nada tocando</div>
           <div id="np-artist" class="np-artist"></div>
@@ -119,8 +118,8 @@
           </button>
           <input id="volume" type="range" min="0" max="100" value="80" aria-label="Volume" />
         </div>
-        <a id="jam-stack" class="jam-stack" href="#/jam" hidden></a>
-        <button id="btn-jam" class="ctl ctl-sm" title="Jam" aria-label="Jam">
+        <a id="jam-stack" class="jam-stack" href="#/friends" hidden></a>
+        <button id="btn-jam" class="ctl ctl-sm" title="Amigos e Jam" aria-label="Amigos e Jam">
           <svg viewBox="0 0 24 24" class="stroke"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.2a5 5 0 0 1 5.5 4.8"/></svg>
           <span id="jam-count" class="jam-count"></span>
         </button>

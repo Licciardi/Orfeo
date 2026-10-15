@@ -409,6 +409,124 @@ input[type=range] { accent-color: var(--accent); }
 .q-by .avatar { box-shadow: 0 0 0 2px var(--panel); }
 .queue-list li .avatar img { width: 100%; height: 100%; border-radius: 0; }
 
+/* Cards 3D dos resultados da busca (inspirado em "Pure CSS parallax card on :hover", Ana Tudor) */
+.tcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 22px 18px; padding: 6px 2px 28px; }
+.tcard-scene { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; perspective: 65em; position: relative; }
+.tcard-scene:hover, .tcard-scene:focus-within { z-index: 2; }
+.tcard {
+  --ma: 18deg;                                   /* inclinação máxima */
+  --oz: 3em;                                     /* ponto de giro no eixo z */
+  --dz: 2.4em;                                   /* quanto o texto flutua à frente */
+  --fn: cubic-bezier(.175, .885, .32, 1.275);    /* curva com "mola" */
+  --g: 1.25em; --l: 1px;                         /* grade do fundo */
+  display: grid; grid-template: minmax(0, 1fr)/ minmax(0, 1fr); min-width: 0; /* textos longos não alargam o card */
+  position: relative; aspect-ratio: 3/ 4; border-radius: 1.1em; cursor: pointer; outline: none;
+  transform-origin: 50% 50% var(--oz);
+  transform-style: preserve-3d;
+  transform: rotateX(calc(var(--dj, 0) * var(--ma))) rotateY(calc(var(--di, 0) * var(--ma)));
+  transition: transform .45s var(--fn), box-shadow .3s;
+  box-shadow: 0 22px 44px -16px rgb(0 0 0 / .7);
+}
+.tcard > * { grid-area: 1/ 1; }
+.tcard.is-tilted { box-shadow: 0 30px 60px -12px rgb(0 0 0 / .75); }
+.tcard:focus-visible { box-shadow: 0 0 0 3px var(--accent), 0 22px 44px -16px rgb(0 0 0 / .7); }
+
+/* Superfície: capa (imagem) + escurecido embaixo e grade sutil por cima + brilho */
+.tcard-face {
+  position: relative; overflow: hidden; border-radius: inherit;
+  border: solid 1px rgb(255 255 255 / 8%);
+  background: linear-gradient(135deg, #222, #111); /* enquanto a capa carrega */
+}
+.tcard-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.tcard-face::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    conic-gradient(from 90deg at var(--l) var(--l), #0000 25%, rgb(255 255 255 / 5%) 0%) 0/ var(--g) var(--g),
+    linear-gradient(180deg, #0000 30%, rgb(0 0 0 / .35) 55%, rgb(0 0 0 / .9));
+}
+/* Brilho que corre na direção oposta ao mouse */
+.tcard-face::before {
+  content: ""; position: absolute; inset: -50%; z-index: 1;
+  background: radial-gradient(closest-side, rgb(255 255 255 / .22), #0000);
+  translate: calc(var(--di, 0) * -28%) calc(var(--dj, 0) * 28%);
+  opacity: 0; transition: opacity .3s, translate .45s var(--fn);
+}
+.tcard.is-tilted .tcard-face::before { opacity: 1; }
+
+/* Camadas que flutuam à frente (parallax) */
+.tcard-text {
+  align-self: end; min-width: 0; padding: 14px 58px 14px 14px; pointer-events: none;
+  transform: translateZ(var(--dz)); text-shadow: 0 2px 12px rgb(0 0 0 / .8);
+}
+.tcard-text h3 {
+  margin: 0; font-size: 1rem; font-weight: 800; line-height: 1.25; letter-spacing: -.01em;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.tcard-text p { margin: 4px 0 0; font-size: .8rem; color: #ffffffbf; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tcard-text p span { color: #ffffff80; }
+.tcard-play {
+  align-self: end; justify-self: end; margin: 14px; width: 44px; height: 44px; border-radius: 50%; border: 0;
+  display: grid; place-items: center; background: var(--accent); color: #fff;
+  box-shadow: 0 10px 24px -6px color-mix(in srgb, var(--accent) 70%, #000);
+  transform: translateZ(calc(var(--dz) * 1.5)) scale(.85); opacity: 0;
+  transition: opacity .25s, transform .35s var(--fn);
+}
+.tcard-play svg { width: 18px; height: 18px; fill: currentColor; margin-left: 2px; }
+.tcard-actions {
+  align-self: start; justify-self: end; display: flex; flex-direction: column; gap: 6px; margin: 10px;
+  transform: translateZ(calc(var(--dz) * 1.2)); opacity: 0; transition: opacity .25s;
+}
+.tcard-btn {
+  width: 32px; height: 32px; border-radius: 50%; border: 0; display: grid; place-items: center;
+  background: rgb(0 0 0 / .55); backdrop-filter: blur(6px); color: #fff; font-size: .95rem;
+}
+.tcard-btn:hover { background: rgb(0 0 0 / .8); color: var(--accent); }
+.tcard-scene:hover .tcard-play, .tcard-scene:hover .tcard-actions,
+.tcard:focus-within .tcard-play, .tcard:focus-within .tcard-actions { opacity: 1; }
+.tcard-scene:hover .tcard-play { transform: translateZ(calc(var(--dz) * 1.5)) scale(1); }
+.tcard-play:hover { filter: brightness(1.12); }
+
+/* Música tocando agora */
+.tcard-now {
+  align-self: start; justify-self: start; margin: 10px; padding: 4px 9px 4px 7px; border-radius: 999px;
+  display: none; align-items: center; gap: 6px; background: var(--accent); color: #fff;
+  font-size: .65rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  transform: translateZ(calc(var(--dz) * 1.2));
+}
+.tcard.is-current .tcard-now { display: inline-flex; }
+.tcard.is-current .tcard-face { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.tcard-eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 9px; }
+.tcard-eq i { width: 2px; height: 100%; background: #fff; border-radius: 1px; animation: tcard-eq .9s ease-in-out infinite; }
+.tcard-eq i:nth-child(2) { animation-delay: -.3s; }
+.tcard-eq i:nth-child(3) { animation-delay: -.6s; }
+@keyframes tcard-eq { 0%, 100% { transform: scaleY(.3); } 50% { transform: scaleY(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .tcard, .tcard-face::before, .tcard-play { transition: none; }
+  .tcard-eq i { animation: none; }
+}
+
+/* Painel da Jam (dentro de Amigos) */
+.jam-panel { max-width: 760px; margin: 0 0 22px; padding: 18px 20px; border-radius: 16px; background: #ffffff08; border: 1px solid #ffffff0d; }
+.jam-panel.is-live {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 16%, transparent), #ffffff06 60%);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.jam-panel h2 { margin: 0; font-size: 1.15rem; }
+.jam-panel p { margin: 4px 0 0; color: var(--muted); font-size: .88rem; line-height: 1.5; }
+.jam-panel-head { display: flex; align-items: center; gap: 14px; }
+.jam-panel-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.jam-panel-actions .jam-join { flex: 1; min-width: 220px; }
+.jam-or { color: var(--muted); font-size: .85rem; }
+.jam-panel .jam-hint { margin-top: 12px; }
+.jam-live-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.jam-live-top .jam-badge { margin-bottom: 8px; }
+.jam-panel .jam-code-row { margin: 14px 0 4px; }
+.jam-panel .jam-code { font-size: 2.2rem; }
+.jam-people { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+.jam-person { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; border-radius: 999px; background: #ffffff0f; font-size: .88rem; font-weight: 600; }
+.jam-waiting { color: var(--muted); font-size: .85rem; }
+
 /* Amigos */
 .nav-count { margin-left: 6px; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #fff; font-size: .7rem; font-weight: 800; line-height: 18px; display: inline-block; text-align: center; }
 .nav-count:empty { display: none; }
@@ -417,6 +535,7 @@ input[type=range] { accent-color: var(--accent); }
 .friend-code { font-size: 1.6rem; font-weight: 800; letter-spacing: .12em; font-variant-numeric: tabular-nums; user-select: all; }
 .friend-add { flex: 1; min-width: 260px; align-items: center; }
 .friend-add input { letter-spacing: .1em; }
+.jam-join input::placeholder { letter-spacing: 0; text-transform: none; font-weight: 500; }
 .friend-add input::placeholder { letter-spacing: 0; text-transform: none; font-weight: 500; }
 .friends-status { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .9rem; }
 .friends-count { color: var(--muted); font-size: .85rem; font-weight: 600; margin-left: 6px; }
