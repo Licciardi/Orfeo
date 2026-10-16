@@ -20,6 +20,7 @@
 import { player, profile, history, Storage, Emitter } from "./platform.js";
 import { jam } from "./jam.js";
 import { ALPHABET, randomCode, randomKey, loadPeerJS, openPeer, str, cleanName, safePhoto, cleanTrack, cleanTags, cleanTopArtists } from "./net.js";
+import { relay, inbox, keyFrom, sendSealed, openSealed, RelayLink } from "./relay.js";
 
 const PREFIX = "orfeo-u-";
 const RETRY_MS = 30_000;     // tenta reconectar amigos / reenviar pedidos a cada 30 s
@@ -44,6 +45,8 @@ class Friends extends Emitter {
   #peer = null;
   #conns = new Map();   // code → conexão autenticada com o amigo
   #dialing = new Set();
+  #relayLinks = new Map(); // code → ligação pelo retransmissor (plano B)
+  #relayInbox = false;
   #timer = 0;
   #debounce = 0;
 
@@ -58,11 +61,16 @@ class Friends extends Emitter {
     profile.on("change", () => this.#sendAll({ type: "profile", ...this.#me() }));
   }
 
+  // Por onde estamos falando com esse amigo agora: "direct" | "relay" | null (offline)
+  via(code) { const c = this.#conns.get(code); return c ? (c.isRelay ? "relay" : "direct") : null; }
+
   get onlineCount() { return [...this.presence.values()].filter((p) => p.online).length; }
 
   // ---------- Conexão com o servidor de encontros ----------
   async start() {
     if (this.#peer) return;
+    if (!this.#timer) this.#timer = setInterval(() => this.#tick(), RETRY_MS);
+    this.#relayUp();
     this.#setStatus("connecting");
     try {
       await loadPeerJS();
@@ -78,21 +86,28 @@ class Friends extends Emitter {
     this.#peer.on("disconnected", () => { if (this.#peer && !this.#peer.destroyed) this.#peer.reconnect(); });
     this.#peer.on("error", () => {}); // "amigo offline" chega aqui: é normal, a lista mostra
     this.#setStatus("online");
-    clearInterval(this.#timer);
-    this.#timer = setInterval(() => this.#tick(), RETRY_MS);
     this.#tick();
   }
 
   // Liga para quem precisa: amigos ainda não conectados e pedidos ainda não respondidos.
   // Entre dois amigos, só o de código "menor" liga — evita conexões duplicadas.
   #tick() {
-    if (!this.#peer || this.#peer.disconnected) return;
+    this.#relayUp();
+    // Amigos ligados pelo retransmissor: manda "ainda estou aqui"; sem notícia há 80 s = offline
+    for (const c of [...this.#conns.values()]) {
+      if (!c.isRelay) continue;
+      if (Date.now() - c.lastSeen > 80_000) c.close();
+      else this.#send(c, { type: "presence", ...this.#presence() });
+    }
     for (const f of this.list) if (!this.#conns.has(f.code) && this.code < f.code) this.#dial(f.code, { type: "hello", key: f.key });
     for (const r of this.outgoing) if (!this.#conns.has(r.code)) this.#dial(r.code, { type: "friend-request", key: r.key });
   }
 
   #dial(code, first) {
     if (this.#dialing.has(code)) return;
+    const message = () => ({ ...first, code: this.code, ...this.#me(), ...(first.type === "hello" ? this.#presence() : {}), type: first.type });
+    const direct = this.#peer && !this.#peer.disconnected && !Storage.get("debug.forceRelay", false);
+    if (!direct) return this.#dialRelay(code, message(), first.type);
     this.#dialing.add(code);
     const conn = this.#peer.connect(PREFIX + code, { reliable: true });
     // Pedido de amizade: mostra na tela se chegou ou não (antes ficava "esperando" sem dar pista)
@@ -103,19 +118,69 @@ class Friends extends Emitter {
       this.#save();
       this.emit("change");
     };
-    const giveUp = setTimeout(() => {
-      this.#dialing.delete(code);
-      try { conn.close(); } catch {}
-      mark("unreachable"); // app do amigo não respondeu: fechado, offline ou versão antiga
-    }, 12_000);
+    // Ligação direta não fechou (rede bloqueando, app fechado…): tenta pelo retransmissor
+    const fallback = () => { this.#dialing.delete(code); this.#dialRelay(code, message(), first.type); };
+    const giveUp = setTimeout(() => { try { conn.close(); } catch {} fallback(); }, 12_000);
     conn.on("open", () => {
       clearTimeout(giveUp);
       this.#dialing.delete(code);
       this.#wire(conn);
-      this.#send(conn, { ...first, code: this.code, ...this.#me(), ...(first.type === "hello" ? this.#presence() : {}), type: first.type });
+      this.#send(conn, message());
       mark("delivered");
     });
-    conn.on("error", () => { clearTimeout(giveUp); this.#dialing.delete(code); mark("unreachable"); });
+    conn.on("error", () => { clearTimeout(giveUp); fallback(); });
+  }
+
+  // ---------- Retransmissor (plano B) ----------
+  // Caixa de entrada no retransmissor: mensagens trancadas para o MEU código chegam aqui
+  async #relayUp() {
+    if (this.#relayInbox) return;
+    this.#relayInbox = true;
+    try { await relay.subscribe(await inbox("u", this.code), (text) => this.#onRelay(text)); }
+    catch { this.#relayInbox = false; } // servidores fora: tenta de novo no próximo ciclo
+  }
+
+  // Chaves possíveis para quem mandou: amizade (ou pedido em andamento) e a de pedidos novos
+  async #relayKeys(from) {
+    if (!isCode(from) || from === this.code) return [];
+    const keys = [];
+    for (const k of [this.list.find((x) => x.code === from)?.key, this.outgoing.find((x) => x.code === from)?.key, this.incoming.find((x) => x.code === from)?.key]) {
+      if (isKey(k)) keys.push(await keyFrom("friend", k));
+    }
+    keys.push(await keyFrom("request", this.code)); // pedido de amizade de quem ainda não é amigo
+    return keys;
+  }
+
+  async #onRelay(text) {
+    const got = await openSealed(text, (from) => this.#relayKeys(from));
+    if (got) this.#relayLink(got.from).deliver(got.msg);
+  }
+
+  #relayLink(code) {
+    let link = this.#relayLinks.get(code);
+    if (link?.open) return link;
+    link = new RelayLink(PREFIX + code, async (obj) => {
+      const secret = obj.type === "friend-request" ? null
+        : this.list.find((x) => x.code === code)?.key || this.outgoing.find((x) => x.code === code)?.key || this.incoming.find((x) => x.code === code)?.key;
+      const key = secret ? await keyFrom("friend", secret) : obj.type === "friend-request" ? await keyFrom("request", code) : null;
+      if (!key) throw new Error("sem chave");
+      await sendSealed(await inbox("u", code), key, this.code, obj);
+    });
+    link.on("close", () => { if (this.#relayLinks.get(code) === link) this.#relayLinks.delete(code); });
+    this.#relayLinks.set(code, link);
+    this.#wire(link);
+    return link;
+  }
+
+  async #dialRelay(code, msg, type) {
+    const req = type === "friend-request" && this.outgoing.find((r) => r.code === code);
+    try {
+      await relay.ensure();
+      this.#relayLink(code).send(msg);
+      if (req && req.state !== "delivered") { req.state = "relay"; this.#save(); this.emit("change"); }
+    } catch {
+      if (req && req.state !== "delivered") { req.state = "unreachable"; this.#save(); this.emit("change"); }
+    }
   }
 
   #wire(conn) {
@@ -164,12 +229,11 @@ class Friends extends Emitter {
         if (!f) return; // chave errada: não é amigo (ou alguém tentando se passar por um)
         const already = this.#conns.get(code);
         if (already && already !== conn) { try { already.close(); } catch {} }
-        const firstTime = !already || already !== conn;
         this.#conns.set(code, conn);
         this.#updateFriend(f, msg);
         this.#applyPresence(code, msg);
         // Responde o "hello" para o outro lado também nos reconhecer
-        if (firstTime && !msg.reply) this.#send(conn, { type: "hello", reply: true, code: this.code, key: f.key, ...this.#me(), ...this.#presence() });
+        if (!msg.reply) this.#send(conn, { type: "hello", reply: true, code: this.code, key: f.key, ...this.#me(), ...this.#presence() });
         this.emit("change");
         return;
       }
@@ -214,7 +278,7 @@ class Friends extends Emitter {
       case "unfriend": this.#forget(code); this.emit("change"); return;
       case "jam-invite": {
         const jamCode = str(msg.jam, 6).toUpperCase();
-        if (/^[A-Z0-9]{6}$/.test(jamCode)) this.emit("invite", { name: friend.name, photo: this.presence.get(code)?.photo || friend.photo, jam: jamCode });
+        if (/^[A-Z0-9]{6}$/.test(jamCode)) this.emit("invite", { name: friend.name, photo: this.presence.get(code)?.photo || friend.photo, jam: jamCode, key: isKey(msg.key) ? msg.key : "" });
         return;
       }
     }
@@ -250,6 +314,7 @@ class Friends extends Emitter {
     if ("track" in msg) p.track = cleanTrack(msg.track);
     if ("playing" in msg) p.playing = !!msg.playing;
     if ("jam" in msg) p.jam = /^[A-Z0-9]{6}$/.test(String(msg.jam)) ? String(msg.jam) : null;
+    if ("jam" in msg) p.jamKey = p.jam && isKey(msg.jamKey) ? msg.jamKey : null; // segredo da Jam (plano B)
     if ("tags" in msg) p.tags = cleanTags(msg.tags);
     if ("top" in msg) p.top = cleanTopArtists(msg.top);
     this.presence.set(code, p);
@@ -272,6 +337,7 @@ class Friends extends Emitter {
       track: t ? { id: t.id, title: t.title, artist: t.artist, thumb: t.thumb } : null,
       playing: !!t && player.playing,
       jam: jam.status === "live" ? jam.code : null,
+      jamKey: jam.status === "live" ? jam.secret : null,
     };
   }
 
@@ -339,7 +405,7 @@ class Friends extends Emitter {
   invite(code) {
     const c = this.#conns.get(code);
     if (!c || jam.status !== "live") return false;
-    this.#send(c, { type: "jam-invite", jam: jam.code });
+    this.#send(c, { type: "jam-invite", jam: jam.code, key: jam.secret });
     return true;
   }
 

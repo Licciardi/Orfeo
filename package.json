@@ -1,7 +1,7 @@
 {
   "name": "orfeo",
   "productName": "Orfeo",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Player de música desktop no estilo Spotify, tocando do YouTube / YouTube Music",
   "license": "MIT",
   "author": "Luigi Licciardi",
@@ -34,6 +34,7 @@
   "devDependencies": {
     "electron": "^44.7.2",
     "electron-builder": "^26.15.3",
+    "mqtt": "^5.16.1",
     "peerjs": "^1.5.5"
   }
 }

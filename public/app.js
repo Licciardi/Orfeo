@@ -699,7 +699,8 @@ function openAddFriend() {
 const REQ_STATE = {
   trying: "· procurando o app dele…",
   delivered: "· ✓ entregue, esperando ele aceitar",
-  unreachable: "· não encontrado — ele precisa estar com o Orfeo aberto (versão nova, não o Sonora). Tentando de novo a cada 30 s",
+  relay: "· enviado pelo retransmissor, esperando ele aceitar",
+  unreachable: "· não deu para enviar agora (sem internet ou retransmissor fora). Tentando de novo a cada 30 s",
 };
 
 // ---------- Lista de amigos ----------
@@ -719,7 +720,7 @@ function renderFriendsBody() {
       : "Online";
     const action = !p.online ? ""
       : inMyJam ? `<span class="friend-badge">na sua Jam</span>`
-      : p.jam ? `<button class="pill" data-join="${esc(p.jam)}" data-name="${esc(who.name)}">Entrar na Jam</button>`
+      : p.jam ? `<button class="pill" data-join="${esc(p.jam)}" data-key="${esc(p.jamKey || "")}" data-name="${esc(who.name)}">Entrar na Jam</button>`
       : `<button class="pill ghost" data-invite="${esc(f.code)}" data-name="${esc(who.name)}">Chamar</button>`;
     return `
       <li class="friend is-clickable ${p.online ? "is-online" : ""}" data-code="${esc(f.code)}" tabindex="0" title="Ver perfil de ${esc(who.name)}">
@@ -773,7 +774,7 @@ function renderFriendsBody() {
   body.querySelectorAll("[data-remove]").forEach((b) => b.addEventListener("click", () => {
     if (confirm(`Desfazer amizade com ${b.dataset.name}?`)) friends.remove(b.dataset.remove);
   }));
-  body.querySelectorAll("[data-join]").forEach((b) => b.addEventListener("click", () => joinFriendJam(b.dataset.join, b.dataset.name)));
+  body.querySelectorAll("[data-join]").forEach((b) => b.addEventListener("click", () => joinFriendJam(b.dataset.join, b.dataset.name, b.dataset.key)));
   body.querySelectorAll("[data-invite]").forEach((b) => b.addEventListener("click", async () => {
     b.disabled = true;
     try {
@@ -814,7 +815,7 @@ function renderFriendProfile() {
       <div class="fp-meta">
         <div class="hero-kind">Amigo</div>
         <h1>${esc(who.name)}</h1>
-        <div class="fp-status"><span class="fp-dot"></span>${status}</div>
+        <div class="fp-status"><span class="fp-dot"></span>${status}${friends.via(code) ? `<span class="fp-via">· ${friends.via(code) === "relay" ? "pelo retransmissor" : "conexão direta"}</span>` : ""}</div>
         ${tags.length ? `<div class="tags-row">${tags.map((t) => tagChip(t)).join("")}</div>` : ""}
       </div>
     </header>
@@ -852,7 +853,7 @@ function renderFriendProfile() {
     <button class="link-btn fp-remove" data-remove>Desfazer amizade</button>`;
 
   box.querySelector("[data-listen]")?.addEventListener("click", () => { player.playList([p.track], 0); toast(`Tocando “${p.track.title}”`); });
-  box.querySelector("[data-join]")?.addEventListener("click", (e) => joinFriendJam(e.target.dataset.join, who.name));
+  box.querySelector("[data-join]")?.addEventListener("click", () => joinFriendJam(p.jam, who.name, p.jamKey));
   box.querySelector("[data-invite]")?.addEventListener("click", async (e) => {
     e.target.disabled = true;
     try {
@@ -866,18 +867,18 @@ function renderFriendProfile() {
   });
 }
 
-async function joinFriendJam(code, name) {
+async function joinFriendJam(code, name, key = "") {
   if (jam.active) {
     if (jam.code === code) return (location.hash = "#/friends");
     if (!confirm(`Sair da Jam atual e entrar na de ${name}?`)) return;
     jam.leave(true);
   }
-  try { await jam.join(code); location.hash = "#/friends"; }
+  try { await jam.join(code, key); location.hash = "#/friends"; }
   catch (err) { toast(err.message); }
 }
 
 // Convite de amigo: cartão com botão "Entrar" (some sozinho em 30 s)
-function showInvite({ name, photo, jam: code }) {
+function showInvite({ name, photo, jam: code, key }) {
   document.querySelector(".invite-card")?.remove();
   const card = document.createElement("div");
   card.className = "invite-card";
@@ -888,7 +889,7 @@ function showInvite({ name, photo, jam: code }) {
     <button class="icon-btn" data-close title="Fechar">✕</button>`;
   document.body.append(card);
   const close = () => card.remove();
-  card.querySelector("[data-go]").addEventListener("click", () => { close(); joinFriendJam(code, name); });
+  card.querySelector("[data-go]").addEventListener("click", () => { close(); joinFriendJam(code, name, key); });
   card.querySelector("[data-close]").addEventListener("click", close);
   setTimeout(close, 30_000);
 }

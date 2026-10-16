@@ -7,8 +7,14 @@
 //                           { type: "members", members }
 //   convidado → anfitrião:  { type: "hello", name, photo }  { type: "cmd", action, args }
 // O anfitrião é a fonte da verdade: comandos dos convidados são validados e aplicados nele.
-import { player, profile, Emitter } from "./platform.js";
-import { randomCode, loadPeerJS, openPeer, friendlyError, str, cleanName, safePhoto, cleanTrack, cleanTracks, toInt } from "./net.js";
+import { player, profile, Storage, Emitter } from "./platform.js";
+import { randomCode, randomKey, loadPeerJS, openPeer, friendlyError, str, cleanName, safePhoto, cleanTrack, cleanTracks, toInt } from "./net.js";
+import { relay, inbox, keyFrom, sendSealed, openSealed, RelayLink } from "./relay.js";
+
+// Plano B (retransmissor): quando a conexão direta não fecha, a Jam passa pelo servidor de mensagens,
+// trancada com o segredo da Jam — que só circula pelos canais (já trancados) entre amigos.
+const RELAY_PING_MS = 10_000, RELAY_TIMEOUT_MS = 35_000;
+const isSecret = (k) => typeof k === "string" && /^[0-9a-f]{32}$/.test(k);
 
 const PEER_PREFIX = "orfeo-jam-";
 const MAX_GUESTS = 7;
@@ -19,6 +25,7 @@ class Jam extends Emitter {
   role = null;       // null | "host" | "guest"
   status = "";       // "" | "connecting" | "live"
   code = "";
+  secret = "";       // segredo da Jam (para o retransmissor); só vai para amigos
   members = [];      // [{ id, name, photo, host }]
 
   #peer = null;
@@ -26,6 +33,10 @@ class Jam extends Emitter {
   #offs = [];
   #heartbeat = 0;
   #debounce = 0;
+  #relayTopics = [];   // caixas de entrada assinadas no retransmissor
+  #relayGuests = new Map(); // anfitrião: id do convidado → ligação pelo retransmissor
+  #relayTimer = 0;
+  #myRelayId = "";
 
   constructor() {
     super();
@@ -34,7 +45,7 @@ class Jam extends Emitter {
 
   get active() { return !!this.role; }
   get hostName() { return this.members.find((m) => m.host)?.name ?? ""; }
-  get myId() { return this.#peer?.id ?? ""; }
+  get myId() { return this.#myRelayId || (this.#peer?.id ?? ""); }
   member(id) { return this.members.find((m) => m.id === id); }
 
   #me() { return { name: cleanName(profile.name || "Convidado"), photo: safePhoto(profile.photo) }; }
@@ -61,7 +72,38 @@ class Jam extends Emitter {
     // Qualquer mudança no player do anfitrião vai para todo mundo
     this.#offs = ["track", "state", "queue", "seek"].map((evt) => player.on(evt, () => this.#scheduleBroadcast()));
     this.#heartbeat = setInterval(() => player.playing && this.#broadcast(), 2000); // corrige atrasos
+    this.secret = randomKey();
+    this.#hostRelay().catch(() => {}); // sem retransmissor: a Jam segue só com conexões diretas
     this.#set("host", "live");
+  }
+
+  // Convidados que não conseguem ligação direta chegam por aqui
+  async #hostRelay() {
+    const secret = this.secret, key = await keyFrom("jam", secret);
+    const topic = await inbox("jh", secret);
+    this.#relayTopics.push(topic);
+    await relay.subscribe(topic, async (text) => {
+      if (this.secret !== secret) return;
+      const got = await openSealed(text, async (from) => (/^[0-9a-f]{16}$/.test(from) ? [key] : []));
+      if (!got) return;
+      const id = "relay:" + got.from;
+      let link = this.#relayGuests.get(id);
+      if (!link?.open) {
+        const guestTopic = await inbox("jg", `${secret}:${got.from}`);
+        link = new RelayLink(id, (obj) => sendSealed(guestTopic, key, "host", obj));
+        this.#relayGuests.set(id, link);
+        link.on("close", () => this.#relayGuests.delete(id));
+        this.#acceptGuest(link);
+      }
+      link.deliver(got.msg);
+    });
+    // "ainda estou aqui" para quem está pelo retransmissor; quem sumir sai da Jam
+    this.#relayTimer = setInterval(() => {
+      for (const link of [...this.#relayGuests.values()]) {
+        if (Date.now() - link.lastSeen > RELAY_TIMEOUT_MS) link.close();
+        else this.#send(link, { type: "ping" });
+      }
+    }, RELAY_PING_MS);
   }
 
   #acceptGuest(conn) {
@@ -99,6 +141,12 @@ class Jam extends Emitter {
     if (msg.type === "profile" && this.#conns.has(conn.peer)) {
       const m = this.member(conn.peer);
       if (m) { m.name = cleanName(msg.name); m.photo = safePhoto(msg.photo); this.#sendMembers(); this.emit("change"); }
+    }
+    // convidado pelo retransmissor pediu tudo de novo (a primeira resposta pode ter se perdido)
+    if (msg.type === "bye" && conn.isRelay) return conn.close(); // convidado saiu (pelo retransmissor)
+    if (msg.type === "resync" && this.#conns.has(conn.peer)) {
+      this.#send(conn, { type: "members", members: this.members });
+      this.#send(conn, this.#state());
     }
     if (msg.type === "cmd" && this.#conns.has(conn.peer)) {
       // "quem adicionou" é sempre quem mandou o comando: ninguém se passa por outra pessoa
@@ -159,25 +207,21 @@ class Jam extends Emitter {
   }
 
   // ---------- Convidado ----------
-  async join(rawCode) {
+  async join(rawCode, secret = "") {
     if (this.active) return;
     const code = String(rawCode).toUpperCase().replace(/[^A-Z0-9]/g, "");
     if (code.length !== 6) throw new Error("O código tem 6 letras/números.");
     this.code = code;
+    this.secret = isSecret(secret) ? secret : "";
     this.#set("guest", "connecting");
     let conn;
     try {
-      await loadPeerJS();
-      this.#peer = await openPeer();
-      conn = this.#peer.connect(PEER_PREFIX + code, { reliable: true });
-      await new Promise((ok, fail) => {
-        const timer = setTimeout(() => fail(new Error("A Jam não respondeu. Confira o código e tente de novo.")), 15000);
-        conn.on("open", () => { clearTimeout(timer); ok(); });
-        this.#peer.on("error", (e) => { clearTimeout(timer); fail(friendly(e)); });
-      });
+      conn = await this.#joinDirect(code);
     } catch (e) {
-      this.leave(true);
-      throw e.type || e.message ? e : friendly(e);
+      // "não achei essa Jam" é definitivo; qualquer outra falha tenta o retransmissor
+      if (e.type === "peer-unavailable" || !this.secret) { this.leave(true); throw e.type || e.message ? e : friendly(e); }
+      try { conn = await this.#joinRelay(); }
+      catch (err) { this.leave(true); throw err; }
     }
     this.#conns.set("host", conn);
     conn.on("data", (msg) => this.#onHostMessage(msg));
@@ -186,9 +230,48 @@ class Jam extends Emitter {
       this.emit("toast", "A Jam terminou");
       this.leave(true);
     });
-    this.#send(conn, { type: "hello", ...this.#me() });
+    this.#send(conn, conn.isRelay ? { type: "resync" } : { type: "hello", ...this.#me() });
     player.remote = (action, args) => this.#send(conn, { type: "cmd", action, args });
     this.#set("guest", "live");
+  }
+
+  async #joinDirect(code) {
+    if (Storage.get("debug.forceRelay", false)) throw new Error("forçando retransmissor (teste)");
+    await loadPeerJS();
+    this.#peer = await openPeer();
+    const conn = this.#peer.connect(PEER_PREFIX + code, { reliable: true });
+    await new Promise((ok, fail) => {
+      const timer = setTimeout(() => fail(new Error("A Jam não respondeu. Confira o código e tente de novo.")), 15000);
+      conn.on("open", () => { clearTimeout(timer); ok(); });
+      this.#peer.on("error", (e) => { clearTimeout(timer); fail(friendly(e)); });
+    });
+    return conn;
+  }
+
+  // Entra pela caixa de entrada da Jam no retransmissor e espera o anfitrião responder
+  async #joinRelay() {
+    const secret = this.secret, key = await keyFrom("jam", secret);
+    const id = randomKey().slice(0, 16);
+    const hostTopic = await inbox("jh", secret), myTopic = await inbox("jg", `${secret}:${id}`);
+    const link = new RelayLink("relay-host", (obj) => sendSealed(hostTopic, key, id, obj));
+    this.#relayTopics.push(myTopic);
+    await relay.subscribe(myTopic, async (text) => {
+      const got = await openSealed(text, async (from) => (from === "host" ? [key] : []));
+      if (got) link.deliver(got.msg);
+    });
+    const answered = new Promise((ok, fail) => {
+      const timer = setTimeout(() => fail(new Error("A Jam não respondeu (nem pelo retransmissor).")), 12_000);
+      link.on("data", () => { clearTimeout(timer); ok(); });
+    });
+    link.send({ type: "hello", ...this.#me() });
+    await answered;
+    this.#myRelayId = "relay:" + id;
+    // "ainda estou aqui"; se o anfitrião sumir, a Jam acabou
+    this.#relayTimer = setInterval(() => {
+      if (Date.now() - link.lastSeen > RELAY_TIMEOUT_MS) link.close();
+      else link.send({ type: "ping" });
+    }, RELAY_PING_MS);
+    return link;
   }
 
   #onHostMessage(msg) {
@@ -205,6 +288,10 @@ class Jam extends Emitter {
         id: str(m?.id, 80), name: cleanName(m?.name), photo: safePhoto(m?.photo), host: !!m?.host,
       }));
       this.emit("change");
+    }
+    if (msg.type === "bye") { // anfitrião encerrou (pelo retransmissor não existe "desligar")
+      this.emit("toast", "A Jam terminou");
+      return this.leave(true);
     }
     if (msg.type === "full") {
       this.emit("toast", "Essa Jam está cheia.");
@@ -226,10 +313,19 @@ class Jam extends Emitter {
     clearTimeout(this.#debounce);
     this.#offs.forEach((off) => off());
     this.#offs = [];
-    for (const c of this.#conns.values()) { try { c.close(); } catch {} }
+    for (const c of this.#conns.values()) {
+      if (c.isRelay) this.#send(c, { type: "bye" }); // avisa na hora quem está pelo retransmissor
+      try { c.close(); } catch {}
+    }
     this.#conns.clear();
     this.#peer?.destroy();
     this.#peer = null;
+    clearInterval(this.#relayTimer);
+    this.#relayTopics.forEach((t) => relay.unsubscribe(t));
+    this.#relayTopics = [];
+    this.#relayGuests.clear();
+    this.#myRelayId = "";
+    this.secret = "";
     player.remote = null;
     const wasHost = this.role === "host";
     this.role = null; this.status = ""; this.code = ""; this.members = [];
